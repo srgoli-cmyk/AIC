@@ -43,17 +43,17 @@ Lets a client skip lectures that are already stored. Response `200`, ordered by 
 ## POST /ask
 Body:
 ```json
-{"course_id": "canvas-999999", "question": "How do we differentiate a product?", "top_k": 8}
+{"course_id": "canvas-999999", "question": "How do we differentiate a product?", "top_k": 12}
 ```
-`top_k` is optional, 1 to 20, default 8.
+`top_k` is optional, 1 to 20, default 12.
 
 Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources[].start_sec` / `end_sec` are seconds from the start of the lecture.
 - `sources[].timestamp` is `mm:ss` (or `h:mm:ss`) of `start_sec`.
 - `sources[].url` opens the lecture page; time-jump support is still to be verified (see roadmap).
 
-- `answer` answers only from the course's captions and cites them as `[Lecture N, m:ss]`, or says the captions don't contain the answer. A lecture with no number is cited by its title.
-- `sources` lists the passages the answer cites, most relevant first. It is empty when the answer cites nothing. Citations that match no passage are removed from `answer`.
+- `answer` is Markdown with LaTeX (`$...$`, `$$...$$`) that explains the topic, using the course's captions as its main source. It may use general math knowledge to explain, but only what the captions say is cited, as `[Lecture N, m:ss]`. A lecture with no number is cited by its title. An `answer` can carry text from captions, so a client must not render links, images or HTML from it, other than citations it builds from `sources`.
+- `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.
 - `404`: the course is not synced. A synced course with nothing indexed yet returns `200` with an answer saying so and empty `sources`, once a key is configured.
 
 ## Errors

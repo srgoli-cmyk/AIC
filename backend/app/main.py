@@ -24,6 +24,14 @@ from .schemas import (
 )
 
 log = logging.getLogger("aic")
+# Show INFO from our own logger under uvicorn. Only the `aic` logger is touched, not the root
+# logger, so httpx's per-request INFO lines stay off. The guard avoids a second handler (and
+# doubled lines) if this module is imported again.
+if not log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     [%(name)s] %(message)s"))
+    log.addHandler(_handler)
+log.setLevel(logging.INFO)
 
 # Connection-level failures (server down, refused, dropped). Their text can contain the
 # connection string or bound parameters, so it is never logged or returned.
