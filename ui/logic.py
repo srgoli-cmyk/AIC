@@ -10,8 +10,10 @@ LIST_TIMEOUT = 10
 UNREADABLE = "The backend sent a response this page cannot read. Is BACKEND_URL right?"
 COURSE_KEYS = {"course_id", "code", "name", "lectures", "indexed"}
 SOURCE_KEYS = {"lecture_title", "timestamp", "url", "snippet"}
-# The same rule the sync contract applies to media_url.
-SOURCE_URL = re.compile(r"https://canvaskaf\.ucsd\.edu/media/[^\s()<>]+")
+# A lecture page, optionally with its category and start time, and nothing else.
+SOURCE_URL = re.compile(
+    r"https://canvaskaf\.ucsd\.edu/media/t/[0-9]_[a-z0-9]{8}(?:/\d+)?(?:\?st=\d+)?"
+)
 
 
 class BackendError(Exception):
@@ -98,11 +100,20 @@ def source_link(source: dict) -> str:
 # syntax that could start a link, image, tag, code span or math is escaped. Emphasis, lists,
 # headings and tables still work. Code is shown as text, so nothing can hide in fake code.
 
-_DELIMITED_INLINE = re.compile(r"(?<!\\)\\\((.+?)(?<!\\)\\\)", re.DOTALL)
-_DELIMITED_DISPLAY = re.compile(r"(?<!\\)\\\[(.+?)(?<!\\)\\\]", re.DOTALL)
-# A closing `$` never sits after a space or before a digit, so "$5 and $6" stays text.
+# \( \) and \[ \] are always math. With dollars, money must stay text, so spaces just inside the
+# dollars only count when the content is one token or has a math sign: `$ x $`, `$ x = a $`, but not
+# "$ 5 for the $ amount". A `$` before a digit never closes those, as in "$ 5 and $ 6".
+_LOOKS_LIKE_MATH = r"(?=[^$\n]*[\\=^_{<>+\-\[(])"
+_SPACED_END = r"(?<!\\)\$(?![ \t]*\d)(?!\$)"
 _MATH = re.compile(
-    r"(?<![\\$])\$\$[^$]+?(?<!\\)\$\$(?!\$)|(?<![\\$])\$(?![\s$])[^$\n]*?(?<![\s\\])\$(?![\d$])"
+    r"(?<!\\)\\\((?P<inline>.+?)(?<!\\)\\\)"
+    r"|(?<!\\)\\\[(?P<display>.+?)(?<!\\)\\\]"
+    r"|(?<![\\$])\$\$[^$]+?(?<!\\)\$\$(?!\$)"
+    # $x$, then $ x $, then $x $
+    r"|(?<![\\$])\$(?![\s$])[^$\n]*?(?<![\s\\])\$(?![\d$])"
+    rf"|(?<![\w\\$])\$[ \t]+(?:[^\s$]+[ \t]*|{_LOOKS_LIKE_MATH}[^$\s][^$\n]*?){_SPACED_END}"
+    rf"|(?<![\w\\$])\$(?![\s$\d])(?:[^\s$]+|{_LOOKS_LIKE_MATH}[^$\n]*?)[ \t]+{_SPACED_END}",
+    re.DOTALL,
 )
 _NOT_MATH = re.compile(r"://|www\.|@|&#?\w+;|\n\s*\n", re.IGNORECASE)
 _BACKSLASH_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
@@ -156,10 +167,37 @@ def _safe_text(text: str, citations: dict[str, str]) -> str:
     return "".join(parts)
 
 
-def _safe_math(span: str) -> str:
-    """Spaces are ignored in TeX, and they stop `][`, `](`, `]:` and `<tag` from meaning anything
-    in case the renderer reads this span as text."""
-    return span.replace("]", "] ").replace("<", "< ")
+def _inline_math(content: str) -> str:
+    """Single-dollar math doesn't render with spaces just inside the dollars, and a closing dollar
+    must not follow a backslash."""
+    content = " ".join(content.split())
+    return f"${content} $" if content.endswith("\\") else f"${content}$"
+
+
+def _safe_math(match: re.Match, citations: dict[str, str]) -> str | None:
+    """The math to render, or None if this must stay text. Spaces are ignored in TeX, and they stop
+    `][`, `](`, `]:` and `<tag` from meaning anything in case the renderer reads this as text."""
+    span = match.group()
+    explicit = match["inline"] is not None or match["display"] is not None
+    if match["inline"] is not None:
+        content = match["inline"]
+        math = _inline_math(content)
+    elif match["display"] is not None:
+        content = match["display"]
+        math = f"$${content}$$"
+    elif span.startswith("$$"):
+        content = span[2:-2]
+        math = span
+    else:
+        content = span[1:-1]
+        math = _inline_math(content)
+    if (
+        (explicit and "$" in content)
+        or _NOT_MATH.search(_BACKSLASH_ESCAPE.sub(r"\1", content))
+        or any(citation in content for citation in citations)
+    ):
+        return None
+    return math.replace("]", "] ").replace("<", "< ")
 
 
 def answer_markdown(answer: str, sources: list[dict]) -> str:
@@ -168,21 +206,15 @@ def answer_markdown(answer: str, sources: list[dict]) -> str:
     citations: dict[str, str] = {}
     for source in sources:
         citations.setdefault(source_label(source), source_link(source))
-
-    def delimited(template: str):
-        def convert(match: re.Match) -> str:
-            is_citation = match.group(1).strip() in citations
-            return f"[{match.group(1)}]" if is_citation else template.format(match.group(1))
-
-        return convert
-
-    text = _DELIMITED_INLINE.sub(delimited("${}$"), answer)
-    text = _DELIMITED_DISPLAY.sub(delimited("$${}$$"), text)
     parts: list[str] = []
     end = 0
-    for match in _MATH.finditer(text):
-        if not _NOT_MATH.search(_BACKSLASH_ESCAPE.sub(r"\1", match.group())):
-            parts += [_safe_text(text[end : match.start()], citations), _safe_math(match.group())]
-            end = match.end()
-    parts.append(_safe_text(text[end:], citations))
+    for match in _MATH.finditer(answer):
+        math = _safe_math(match, citations)
+        if math is None:
+            continue
+        before = _safe_text(answer[end : match.start()], citations)
+        # Two spans side by side would read as one `$$`.
+        parts += [before or (" " if parts else ""), math]
+        end = match.end()
+    parts.append(_safe_text(answer[end:], citations))
     return "".join(parts)

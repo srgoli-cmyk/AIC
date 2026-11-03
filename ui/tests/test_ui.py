@@ -1,6 +1,7 @@
 """Runs the page headless with the backend calls mocked; nothing here uses the network."""
 
 import re
+import tomllib
 from pathlib import Path
 
 import httpx
@@ -231,7 +232,14 @@ def test_a_link_inside_what_looks_like_math_cannot_form():
 
 @pytest.mark.parametrize(
     "answer",
-    ["$https://evil.example$", "$a@evil.example$", "$www.evil.example$", "$a&#64;evil.example$"],
+    [
+        "$https://evil.example$",
+        "$a@evil.example$",
+        "$www.evil.example$",
+        "$a&#64;evil.example$",
+        "$ https://evil.example $",
+        "$ a@evil.example $",
+    ],
 )
 def test_a_url_inside_what_looks_like_math_is_removed(answer):
     assert "evil.example" not in _links(answer)
@@ -253,6 +261,85 @@ def test_a_url_inside_what_looks_like_math_is_removed(answer):
 )
 def test_math_keeps_its_meaning_and_other_dollars_are_text(answer, expected):
     assert _links(answer) == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("Let $ x = a $ here.", "Let $x = a$ here."),
+        ("Let $x = a $ here.", "Let $x = a$ here."),
+        ("Let $ x = a$ here.", "Let $x = a$ here."),
+        (r"So $ x \geq a $ holds.", r"So $x \geq a$ holds."),
+        (r"So \( x \geq a \) holds.", r"So $x \geq a$ holds."),
+        (r"So \(x \geq a\) holds.", r"So $x \geq a$ holds."),
+        (r"So \[ x \geq a \] holds.", r"So $$ x \geq a $$ holds."),
+        ("$ x < y $", "$x <  y$"),
+        ("$ [a, b] $", "$[a, b] $"),
+        ("$x$ and $ y $ and $z$", "$x$ and $y$ and $z$"),
+    ],
+)
+def test_math_with_inner_spaces_is_trimmed_and_delimiters_are_converted(answer, expected):
+    assert _links(answer) == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("It costs $5.", r"It costs \$5."),
+        ("From $5 to $10.", r"From \$5 to \$10."),
+        ("Paid $5 and $ 6.", r"Paid \$5 and \$ 6."),
+        ("Paid $ 5 and $ 6.", r"Paid \$ 5 and \$ 6."),
+        ("It was $5, then $ more.", r"It was \$5, then \$ more."),
+        ("US$ and CA$ rates.", r"US\$ and CA\$ rates."),
+        ("Paid $ 5 for the $ amount.", r"Paid \$ 5 for the \$ amount."),
+        ("A $ sign and a $ sign.", r"A \$ sign and a \$ sign."),
+        ("It costs 5 $ and 6 $.", r"It costs 5 \$ and 6 \$."),
+        ("That is 10 $, and the other is 20 $.", r"That is 10 \$, and the other is 20 \$."),
+        ("Compare $AAPL and $TSLA today.", r"Compare \$AAPL and \$TSLA today."),
+        ("The vars $HOME and $PATH are set.", r"The vars \$HOME and \$PATH are set."),
+    ],
+)
+def test_money_stays_plain_text(answer, expected):
+    assert _links(answer) == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("Use the $ sign for $x$ here.", r"Use the \$ sign for $x$ here."),
+        ("Costs $a for $x$ here.", r"Costs \$a for $x$ here."),
+        (r"So 2$\pi r$ and f$x$ and x$^2$.", r"So 2$\pi r$ and f$x$ and x$^2$."),
+        (r"Then \( x \) 5 times, and \(x\) 5 times.", "Then $x$ 5 times, and $x$ 5 times."),
+        (r"\(a\)\(b\) and \(x\)2", "$a$ $b$ and $x$2"),
+        ("\\( x\n+ y \\)", "$x + y$"),
+        (r"\( \$5 + x \)", r"( \$5 + x )"),
+        (r"$ x\ $", r"$x\ $"),
+        ("$a//b$", "$a//b$"),
+    ],
+)
+def test_math_next_to_dollars_and_explicit_delimiters(answer, expected):
+    assert _links(answer) == expected
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "It cost $ 5 [Lecture 8, 0:04] and the $ rate rose.",
+        "See $AAPL [Lecture 8, 0:04] and $TSLA now.",
+        "A $ x = [Lecture 8, 0:04] $ here.",
+        r"A \( [Lecture 8, 0:04] \) here.",
+    ],
+)
+def test_a_citation_is_never_swallowed_by_math(answer):
+    assert "(https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa)" in _links(answer, [SOURCE])
+
+
+def test_math_after_money_still_renders():
+    assert _links("Costs $5 for $x$.") == r"Costs \$5 for $x$."
+
+
+def test_math_before_a_number_still_renders():
+    assert _links("Then $x$ 5 times.") == "Then $x$ 5 times."
 
 
 def test_currency_does_not_swallow_a_citation():
@@ -342,6 +429,43 @@ def test_no_courses(backend):
 def test_source_label_without_a_lecture_number_uses_the_title():
     source = {"lecture_title": "Midterm review", "timestamp": "1:02:03"}
     assert logic.source_label(source) == "Midterm review, 1:02:03"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa?st=0",
+        "https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa/111111",
+        "https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa/111111?st=127",
+    ],
+)
+def test_source_link_accepts_a_lecture_url_with_its_start_time(url):
+    assert logic.source_link({**SOURCE, "url": url}).endswith(f"]({url})")
+    assert f"]({url})" in logic.answer_markdown("Said [Lecture 8, 0:04].", [{**SOURCE, "url": url}])
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example/media/t/1_aaaaaaaa/111111?st=5",
+        "https://canvaskaf.ucsd.edu.evil.example/media/t/1_aaaaaaaa?st=5",
+        "http://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa?st=5",
+        "https://canvaskaf.ucsd.edu/other?st=5",
+        "https://canvaskaf.ucsd.edu/media/other?st=5",
+        "https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa?st=5&x=1",
+    ],
+)
+def test_source_link_with_a_start_time_still_refuses_other_urls(url):
+    assert "](" not in logic.source_link({**SOURCE, "url": url})
+
+
+def test_streamlit_config_hides_the_deploy_button_and_stays_local():
+    config = tomllib.loads(
+        (Path(__file__).resolve().parents[2] / ".streamlit/config.toml").read_text()
+    )
+    assert config["client"]["toolbarMode"] == "minimal"
+    assert config["server"]["address"] == "localhost"
+    assert config["browser"]["gatherUsageStats"] is False
 
 
 @pytest.mark.parametrize(
