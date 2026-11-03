@@ -144,7 +144,7 @@ def test_lecture_of_another_course_is_left_untouched_and_counted(caplog):
     before = _query("SELECT * FROM lectures ORDER BY entry_id")
     other["lectures"][0].update(
         title="Other title TITLE-MARKER",
-        media_url="https://canvaskaf.ucsd.edu/media/other",
+        media_url="https://canvaskaf.ucsd.edu/media/t/1_other001/222222",
         captions_srt="1\n00:00:00,000 --> 00:00:01,000\nCAPTION-MARKER\n",
     )
     other["files"][0]["name"] = "other-name.pdf"
@@ -245,10 +245,10 @@ def test_ask_unknown_course_is_404():
 
 
 @pytest.mark.integration
-def test_ask_known_course_is_501():
+def test_ask_known_course_without_a_key_is_503():
     _sync(SAMPLE)
     r = client.post("/ask", json={"course_id": CID, "question": "anything?"})
-    assert r.status_code == 501
+    assert r.status_code == 503
 
 
 @pytest.mark.integration

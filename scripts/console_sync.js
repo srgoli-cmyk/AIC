@@ -26,7 +26,7 @@
     return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
   }
 
-  function buildSyncPayload({ course, entries, files, now = new Date() }) {
+  function buildSyncPayload({ course, entries, files, categoryId, now = new Date() }) {
     const payload = {
       schema_version: "1",
       synced_at: now.toISOString(),
@@ -43,7 +43,7 @@
             entry_id: e.id,
             title: e.name,
             duration_sec: Number(e.duration) || 0,
-            media_url: MEDIA_BASE + e.id,
+            media_url: MEDIA_BASE + e.id + (categoryId ? `/${categoryId}` : ""),
             captions_srt: e.srt,
           };
           const recorded = toIsoDate(e.createdAt);
@@ -259,7 +259,7 @@
     }
     if (entries.length === 0) throw new Error(`No captions could be read:\n${skipped.join("\n")}`);
 
-    const payload = buildSyncPayload({ course, entries, files: [] });
+    const payload = buildSyncPayload({ course, entries, files: [], categoryId });
     if (payload.lectures.length > 200) throw new Error(`${payload.lectures.length} lectures (contract limit 200).`);
     const text = JSON.stringify(payload, null, 2);
     for (const ks of seenKs) {

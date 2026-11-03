@@ -4,10 +4,16 @@ If you change anything here, the contract must change first (maintainer approval
 extra="forbid" is a security control: unknown fields such as tokens are rejected with 422.
 """
 
+import re
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Same pattern as media_url in contracts/sync_payload.schema.json (a test compares them). Without
+# the category the lecture page answers "Access denied".
+MEDIA_URL_PATTERN = r"^https://canvaskaf\.ucsd\.edu/media/t/[0-9]_[a-z0-9]{8}/[0-9]+$"
+MEDIA_URL_RE = re.compile(MEDIA_URL_PATTERN)
 
 
 class _Strict(BaseModel):
@@ -27,8 +33,20 @@ class Lecture(_Strict):
     title: str = Field(min_length=1, max_length=300)
     recorded_at: date | None = None
     duration_sec: float = Field(ge=0)
-    media_url: str = Field(pattern=r"^https://canvaskaf\.ucsd\.edu/media/")
+    media_url: str
     captions_srt: str = Field(min_length=1, max_length=2_000_000)
+
+    @field_validator("media_url")
+    @classmethod
+    def _media_url_has_category(cls, value: str) -> str:
+        # fullmatch, not match: `$` in a pattern can accept a trailing newline, fullmatch cannot.
+        # The message never repeats the rejected value.
+        if not MEDIA_URL_RE.fullmatch(value):
+            raise ValueError(
+                "media_url must be https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId>, "
+                "with no query or fragment"
+            )
+        return value
 
 
 class CanvasFile(_Strict):
@@ -61,10 +79,15 @@ class CourseSummary(BaseModel):
     indexed: bool
 
 
+class LectureStatus(BaseModel):
+    entry_id: str
+    has_captions: bool
+
+
 class AskRequest(_Strict):
     course_id: str = Field(min_length=1)
     question: str = Field(min_length=1, max_length=2000)
-    top_k: int = Field(default=8, ge=1, le=20)
+    top_k: int = Field(default=12, ge=1, le=20)
 
 
 class Source(BaseModel):

@@ -176,6 +176,7 @@ test("builds the same payload as extension/src/payload.js and matches the contra
     course: { id: 999999, course_code: "TEST 1", name: "Synthetic" },
     entries: ALL.map((id) => ({ id, name: `Lecture ${id}`, duration: 60, createdAt: 1790000000, srt: SRT })),
     files: [],
+    categoryId: CAT,
     now: new Date(payload.synced_at),
   });
   assert.deepEqual(payload, expected);

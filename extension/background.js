@@ -1,20 +1,21 @@
-// Service worker: orchestration only. Step 0 = ping the backend; SYNC lands in step 6.
+// Service worker: thin wiring between the popup and the sync controller.
 import { BACKEND_URL } from "./src/config.js";
+import { createController } from "./src/controller.js";
 
-async function ping() {
-  const r = await fetch(`${BACKEND_URL}/health`);
-  return { ok: r.ok, status: r.status, body: await r.json() };
-}
+const controller = createController({
+  chrome,
+  fetch: (...args) => fetch(...args),
+  backendUrl: BACKEND_URL,
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+});
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  const handlers = {
-    PING: ping,
-    SYNC: async () => ({ ok: false, error: "not implemented yet (roadmap step 6)" }),
-  };
-  const handler = handlers[msg?.type];
-  if (!handler) return false;
-  handler()
-    .then(sendResponse)
-    .catch((e) => sendResponse({ ok: false, error: String(e) }));
+controller.recoverInterrupted().catch(() => {});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender?.id !== chrome.runtime.id) return false;
+  const pending = controller.handle(msg);
+  if (!pending) return false;
+  pending.then(sendResponse).catch(() => sendResponse({ ok: false, error: "Request failed." }));
   return true; // keep the channel open for the async response
 });

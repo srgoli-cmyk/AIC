@@ -18,3 +18,6 @@ __pycache__/
 # node / misc
 node_modules/
 .DS_Store
+
+# streamlit
+.streamlit/secrets.toml

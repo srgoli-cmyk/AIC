@@ -4,11 +4,14 @@ database before the app is imported (settings are read at import time)."""
 import os
 
 import dbtools
+import netguard
 import pytest
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 MAIN_URL, TEST_URL = dbtools.resolve_urls()
 os.environ["DATABASE_URL"] = TEST_URL  # must happen before any `import app...`
+# An existing variable (even an empty one) wins over .env, so no real key is ever loaded in tests.
+os.environ["OPENROUTER_API_KEY"] = ""
 
 from app import db  # noqa: E402
 from app.config import settings  # noqa: E402
@@ -58,9 +61,11 @@ class FakeModel:
 
     def __init__(self):
         self.calls = []  # (number of texts, kwargs) per encode call
+        self.texts = []  # every text encoded, in order
 
     def encode(self, texts, **kwargs):
         self.calls.append((len(texts), kwargs))
+        self.texts.extend(texts)
         vectors = []
         for t in texts:
             v = [0.0] * settings.embedding_dim
@@ -81,3 +86,11 @@ def fake_model(request, monkeypatch):
         monkeypatch.setattr(embeddings, "_load", lambda: model)
         embeddings._load.real = real_load  # for tests of the lazy import itself
     return model
+
+
+@pytest.fixture(autouse=True)
+def _no_real_http(request, monkeypatch):
+    """Any HTTP request that a test did not mock fails that test, and so does a connection to a
+    non-local address. Tests marked `slow` load the real model, which downloads it."""
+    if request.node.get_closest_marker("slow") is None:
+        netguard.block_network(monkeypatch)

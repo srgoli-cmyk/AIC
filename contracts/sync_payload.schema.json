@@ -33,7 +33,7 @@
           "title": { "type": "string", "minLength": 1, "maxLength": 300 },
           "recorded_at": { "type": "string", "format": "date" },
           "duration_sec": { "type": "number", "minimum": 0 },
-          "media_url": { "type": "string", "format": "uri", "pattern": "^https://canvaskaf\\.ucsd\\.edu/media/" },
+          "media_url": { "type": "string", "format": "uri", "pattern": "^https://canvaskaf\\.ucsd\\.edu/media/t/[0-9]_[a-z0-9]{8}/[0-9]+$" },
           "captions_srt": { "type": "string", "minLength": 1, "maxLength": 2000000 }
         }
       }
