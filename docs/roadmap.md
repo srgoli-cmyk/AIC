@@ -29,7 +29,7 @@ even if the extension slips (sync can be demoed with the console snippet).
   only from the chunks with `[Lecture, m:ss]` citations, return `sources[]`.
   Done when: test with a mocked LLM checks the prompt and the response shape; smoke test returns 200.
 
-- [ ] **5. Minimal UI** (maintainer or backend). Streamlit page: pick course, ask, show answer
+- [x] **5. Minimal UI** (maintainer or backend). Streamlit page: pick course, ask, show answer
   and clickable sources. Design does not matter.
 
 - [ ] **6. Extension sync** (extension). Popup "Sync" follows `docs/sync_flow.md`
