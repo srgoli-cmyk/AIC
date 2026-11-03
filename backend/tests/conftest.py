@@ -41,3 +41,43 @@ def _clean_database(request):
         with db.engine.begin() as conn:
             dbtools.truncate_all(conn)
     yield
+
+
+def pytest_collection_modifyitems(config, items):
+    """Tests marked `slow` (they load the real embedding model) only run with `-m slow`. Other
+    `-m` expressions, such as `-m "not integration"`, leave them out too."""
+    if "slow" in (config.getoption("markexpr") or "").replace("not slow", ""):
+        return
+    kept = [i for i in items if i.get_closest_marker("slow") is None]
+    config.hook.pytest_deselected(items=[i for i in items if i not in kept])
+    items[:] = kept
+
+
+class FakeModel:
+    """Stands in for the sentence-transformers model: deterministic one-hot vectors."""
+
+    def __init__(self):
+        self.calls = []  # (number of texts, kwargs) per encode call
+
+    def encode(self, texts, **kwargs):
+        self.calls.append((len(texts), kwargs))
+        vectors = []
+        for t in texts:
+            v = [0.0] * settings.embedding_dim
+            v[sum(map(ord, t)) % settings.embedding_dim] = 1.0
+            vectors.append(v)
+        return vectors
+
+
+@pytest.fixture(autouse=True)
+def fake_model(request, monkeypatch):
+    """Ingestion runs after every /sync. Use a cheap fake model so tests never load the real one
+    (tests marked `slow` keep the real one)."""
+    from app import embeddings
+
+    model = FakeModel()
+    if request.node.get_closest_marker("slow") is None:
+        real_load = embeddings._load
+        monkeypatch.setattr(embeddings, "_load", lambda: model)
+        embeddings._load.real = real_load  # for tests of the lazy import itself
+    return model

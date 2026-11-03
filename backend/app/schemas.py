@@ -50,7 +50,7 @@ class SyncResponse(BaseModel):
     lectures_received: int
     files_received: int
     lectures_skipped_other_course: int
-    status: Literal["accepted", "indexed"]
+    status: Literal["accepted"]
 
 
 class CourseSummary(BaseModel):

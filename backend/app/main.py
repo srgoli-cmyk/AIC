@@ -1,17 +1,17 @@
-"""FastAPI app. Sync and courses are stored in Postgres (app/db.py); ingestion and /ask come in
-steps 3-4."""
+"""FastAPI app. Sync and courses are stored in Postgres (app/db.py); after a sync, captions are
+chunked and embedded in the background (app/ingest.py). /ask comes in step 4."""
 
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import db
+from . import db, ingest
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -96,8 +96,10 @@ def health() -> dict[str, str]:
 
 
 @app.post("/sync", response_model=SyncResponse)
-def sync(payload: SyncPayload) -> SyncResponse:
+def sync(payload: SyncPayload, background: BackgroundTasks) -> SyncResponse:
     cid, skipped = db.save_sync(payload)
+    # Chunking and embedding run after the response is sent; their failures never fail the sync.
+    background.add_task(ingest.ingest_course, cid)
     # Counts what was received, not what was newly stored.
     return SyncResponse(
         course_id=cid,

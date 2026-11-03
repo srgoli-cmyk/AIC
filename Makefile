@@ -5,7 +5,8 @@ PY := $(VENV)/bin/python
 
 setup:
 	python3 -m venv $(VENV)
-	$(PY) -m pip install -r backend/requirements.txt
+	$(PY) -m pip install -r backend/requirements-ml.txt
+	$(PY) -c "from sentence_transformers import SentenceTransformer as S; S('BAAI/bge-small-en-v1.5')"
 	@test -f .env || cp .env.example .env
 	@echo "Activate with: source $(VENV)/bin/activate"
 

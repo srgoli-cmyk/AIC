@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS lectures (
     summary       TEXT
 );
 
+-- Derived from the title at sync time (see app/titles.py) and the hash of the captions the
+-- current chunks were built from (NULL until chunked). Added after the table first shipped.
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS lecture_no   INTEGER;
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS section      TEXT;
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS chunked_hash TEXT;
+
 -- Course files (metadata only). A sync never deletes rows here.
 CREATE TABLE IF NOT EXISTS files (
     canvas_file_id BIGINT PRIMARY KEY,

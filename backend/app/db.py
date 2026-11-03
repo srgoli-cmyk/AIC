@@ -6,6 +6,7 @@ never call `Base.metadata.create_all()`.
 Never log SQLAlchemy exceptions: their text can include bound parameters (captions).
 """
 
+import hashlib
 import logging
 import threading
 from datetime import date, datetime
@@ -19,11 +20,18 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     Text,
+    and_,
+    cast,
     create_engine,
+    delete,
+    exists,
     func,
+    literal,
     select,
     text,
+    update,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import URL, make_url
@@ -31,8 +39,11 @@ from sqlalchemy.exc import DataError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import NullPool
 
+from . import chunking
+from .chunking import Chunk as ChunkData
 from .config import settings
 from .schemas import CourseSummary, SyncPayload, course_id_for
+from .titles import parse_title
 
 log = logging.getLogger("aic")
 
@@ -107,6 +118,10 @@ class Lecture(Base):
     media_url: Mapped[str] = mapped_column(Text)
     captions_srt: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
+    lecture_no: Mapped[int | None] = mapped_column(Integer)
+    section: Mapped[str | None] = mapped_column(Text)
+    # Hash of what the current chunks were built from (see captions_hash); NULL = not chunked.
+    chunked_hash: Mapped[str | None] = mapped_column(Text)
 
 
 class CanvasFile(Base):
@@ -167,13 +182,40 @@ def ensure_schema() -> None:
         _schema_lock.release()
 
 
+def _hash_prefix() -> str:
+    # Read at call time, so a changed version or model makes every stored lecture due.
+    return f"{chunking.CHUNKER_VERSION}\n{settings.embedding_model}\n"
+
+
+def captions_hash(captions: str) -> str:
+    """sha256 (hex) of UTF-8 `version \\n model \\n captions`: what the chunks depend on."""
+    return hashlib.sha256((_hash_prefix() + captions).encode("utf-8")).hexdigest()
+
+
+def _current_hash():
+    """The same hash computed by Postgres, so "which lectures are due" is one query."""
+    prefix = cast(literal(_hash_prefix()), Text)
+    return func.encode(
+        func.sha256(func.convert_to(prefix.op("||")(Lecture.captions_srt), "UTF8")), "hex"
+    )
+
+
+def _is_due():
+    return Lecture.chunked_hash.is_distinct_from(_current_hash())
+
+
+def _has_due_lecture():
+    return exists().where(Lecture.course_id == Course.course_id, _is_due())
+
+
 def save_sync(payload: SyncPayload) -> tuple[str, int]:
     """Upsert the course, its lectures and its files in ONE transaction. Returns the course_id and
     the number of distinct lectures skipped because they belong to another course.
 
     Nothing is ever deleted: lectures or files missing from the payload stay stored, and
     `files: []` therefore leaves stored files alone. Optional columns use COALESCE so an omitted
-    value (e.g. `term`) never erases one stored earlier. `indexed` is not touched here.
+    value (e.g. `term`) never erases one stored earlier. `indexed` is only ever set to false here
+    (when a lecture is new or its captions changed), never to true.
     A lecture already stored under a different course is not touched at all (no field changes).
     A file's course_id is never overwritten on conflict, but its other fields still update.
     """
@@ -207,11 +249,14 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
             if payload.lectures:
                 # One row per entry_id (the last one wins), so a duplicate inside the payload
                 # neither errors nor counts twice.
+                titles = {lec.entry_id: parse_title(lec.title) for lec in payload.lectures}
                 rows = {
                     lec.entry_id: {
                         "entry_id": lec.entry_id,
                         "course_id": cid,
                         "title": lec.title,
+                        "lecture_no": titles[lec.entry_id][0],
+                        "section": titles[lec.entry_id][1],
                         "recorded_at": lec.recorded_at,
                         "duration_sec": lec.duration_sec,
                         "media_url": lec.media_url,
@@ -228,6 +273,8 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                         where=Lecture.course_id == lecture.excluded.course_id,
                         set_={
                             "title": lecture.excluded.title,
+                            "lecture_no": lecture.excluded.lecture_no,
+                            "section": lecture.excluded.section,
                             "recorded_at": func.coalesce(
                                 lecture.excluded.recorded_at, Lecture.recorded_at
                             ),
@@ -254,6 +301,14 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                             owner,
                             cid,
                         )
+
+            # Never claim "indexed" while a lecture is new or has changed captions. An unchanged
+            # re-sync has nothing due, so `indexed` is left as it was.
+            session.execute(
+                update(Course)
+                .where(Course.course_id == cid, _has_due_lecture())
+                .values(indexed=False)
+            )
 
             # `files: []` skips this block, which is what keeps stored files.
             if payload.files:
@@ -317,3 +372,78 @@ def course_exists(course_id: str) -> bool:
     with Session(engine) as session:
         found = session.execute(select(Course.course_id).where(Course.course_id == course_id))
         return found.first() is not None
+
+
+# --- ingestion ---
+
+
+def due_lecture_ids(course_id: str) -> list[str]:
+    """Lectures of the course whose chunks are missing or were built from other captions."""
+    ensure_schema()
+    with Session(engine) as session:
+        stmt = select(Lecture.entry_id).where(Lecture.course_id == course_id, _is_due())
+        return list(session.execute(stmt.order_by(Lecture.entry_id)).scalars())
+
+
+def lecture_captions(entry_id: str) -> str | None:
+    with Session(engine) as session:
+        stmt = select(Lecture.captions_srt).where(Lecture.entry_id == entry_id)
+        return session.execute(stmt).scalar_one_or_none()
+
+
+def replace_chunks(
+    entry_id: str, captions_hash_: str, chunks: list[ChunkData], vectors: list[list[float]]
+) -> bool:
+    """Replace a lecture's chunks in one transaction. Returns False (and writes nothing) if the
+    chunks are already current, or if the captions changed since they were read; in the second
+    case the lecture stays due for the next run.
+
+    The lecture row is locked first, so overlapping ingestions of the same lecture run one after
+    the other and the second one sees the first one's result instead of adding duplicates."""
+    with Session(engine) as session, session.begin():
+        row = session.execute(
+            select(Lecture.chunked_hash, _current_hash())
+            .where(Lecture.entry_id == entry_id)
+            .with_for_update()
+        ).one_or_none()
+        if row is None:
+            return False
+        stored_hash, current_hash = row
+        if current_hash != captions_hash_ or stored_hash == captions_hash_:
+            return False
+        session.execute(delete(Chunk).where(Chunk.entry_id == entry_id))
+        if chunks:
+            session.execute(
+                insert(Chunk),
+                [
+                    {
+                        "entry_id": entry_id,
+                        "start_sec": c.start,
+                        "end_sec": c.end,
+                        "text": c.text,
+                        "embedding": v,
+                    }
+                    for c, v in zip(chunks, vectors, strict=True)
+                ],
+            )
+        session.execute(
+            update(Lecture).where(Lecture.entry_id == entry_id).values(chunked_hash=captions_hash_)
+        )
+    return True
+
+
+def refresh_indexed(course_id: str) -> None:
+    """indexed = the course has lectures and none of them is due."""
+    has_lectures = exists().where(Lecture.course_id == Course.course_id)
+    with Session(engine) as session, session.begin():
+        # Wait for a sync that is still writing this course, THEN look at the lectures. A single
+        # UPDATE that blocks on the row would resume with its old view of the lectures and could
+        # mark the course indexed while a newly synced lecture is due.
+        session.execute(
+            select(Course.course_id).where(Course.course_id == course_id).with_for_update()
+        ).first()
+        session.execute(
+            update(Course)
+            .where(Course.course_id == course_id)
+            .values(indexed=and_(has_lectures, ~_has_due_lecture()))
+        )

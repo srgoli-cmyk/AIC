@@ -5,7 +5,7 @@ timestamps + course files) into a private study space; answers cite the lecture 
 
 ## Quick start
 ```bash
-make setup          # venv + deps, creates .env from .env.example
+make setup          # venv + deps + embedding model download, creates .env from .env.example
 make db             # Postgres + pgvector in Docker (needed from step 2)
 make dev            # backend on http://localhost:8000  (docs at /docs)
 make check          # all automated gates (needs make db)

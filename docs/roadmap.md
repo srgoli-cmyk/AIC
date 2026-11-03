@@ -19,9 +19,11 @@ even if the extension slips (sync can be demoed with the console snippet).
   Done when: integration test syncs the fixture twice and gets one course with 2 lectures; a
   re-sync with `files: []` keeps stored files; a non-empty list upserts by `canvas_file_id`.
 
-- [ ] **3. Ingestion** (backend). SRT parser, chunking into ~45-60 s windows with
-  start/end seconds, embeddings into `chunks`. Runs after `/sync`; status becomes `indexed`.
-  Done when: unit tests for parser and chunker; fixture produces chunks with correct timestamps.
+- [x] **3. Ingestion** (backend). SRT parser, chunking into ~45-60 s windows with
+  start/end seconds, embeddings into `chunks`. Runs in the background after `/sync`; the course's
+  `indexed` becomes true when all its lectures are chunked.
+  Done when: unit tests for parser and chunker; fixture produces chunks with correct timestamps;
+  syncing the fixture via `make dev` ends with `indexed: true`.
 
 - [ ] **4. /ask** (backend). Embed question, top-k by cosine, prompt OpenRouter to answer
   only from the chunks with `[Lecture, m:ss]` citations, return `sources[]`.

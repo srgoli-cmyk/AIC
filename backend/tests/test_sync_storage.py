@@ -44,7 +44,7 @@ def test_sync_twice_gives_one_course_with_two_lectures():
             "code": SAMPLE["course"]["code"],
             "name": SAMPLE["course"]["name"],
             "lectures": 2,
-            "indexed": False,
+            "indexed": True,  # chunked by the background ingestion
         }
     ]
     assert _query("SELECT count(*) FROM files") == [(1,)]

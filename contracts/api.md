@@ -22,7 +22,7 @@ Response `200`:
 ```json
 {"course_id": "canvas-999999", "lectures_received": 2, "files_received": 1, "lectures_skipped_other_course": 0, "status": "accepted"}
 ```
-`status` is `"accepted"` until ingestion is implemented (step 3), then `"indexed"`.
+`status` is always `"accepted"`: ingestion runs in the background after the response. The course's `indexed` in `GET /courses` becomes `true` when all its lectures are chunked. A failure ingesting a lecture does not fail the sync.
 
 ## GET /courses
 Response `200`:

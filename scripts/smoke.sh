@@ -15,6 +15,21 @@ curl -fsS -X POST "$BASE/sync" -H 'Content-Type: application/json' \
 echo "== courses"
 curl -fsS "$BASE/courses"; echo
 
+echo "== wait for indexing (first run loads the embedding model)"
+indexed=""
+for _ in $(seq 1 120); do
+  if curl -fsS "$BASE/courses" | grep -q '"course_id":"canvas-999999"[^}]*"indexed":true'; then
+    indexed=yes
+    break
+  fi
+  sleep 1
+done
+if [[ -z "$indexed" ]]; then
+  echo "course not indexed after 120 s; check the backend log and run make setup" >&2
+  exit 1
+fi
+echo "indexed"
+
 echo "== ask (501 expected until step 4)"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/ask" \
   -H 'Content-Type: application/json' \
