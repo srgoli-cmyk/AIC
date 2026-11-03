@@ -30,7 +30,7 @@ def _json(call) -> object:
     try:
         response = call()
     except httpx.HTTPError as exc:
-        raise BackendError("Could not reach the backend. Is make dev running?") from exc
+        raise BackendError("Could not reach the backend. Is it running?") from exc
     if response.status_code != 200:
         raise BackendError(_detail(response))
     try:

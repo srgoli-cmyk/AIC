@@ -1,4 +1,4 @@
-.PHONY: setup db db-reset dev ui check smoke
+.PHONY: setup db db-reset dev ui start check smoke
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -25,6 +25,9 @@ dev:
 
 ui:
 	BACKEND_URL="$(BACKEND_URL)" $(VENV)/bin/streamlit run ui/app.py --server.address localhost --server.headless true --browser.gatherUsageStats false
+
+start:
+	VENV="$(VENV)" PORT="$(PORT)" BACKEND_URL="$(BACKEND_URL)" bash scripts/start.sh
 
 check:
 	PATH="$(abspath $(VENV))/bin:$$PATH" bash scripts/check_all.sh
