@@ -16,9 +16,10 @@ function toIsoDate(unixSeconds) {
  * @param {object} args.course   Canvas course object: { id, course_code, name, term?: { name } }
  * @param {Array}  args.entries  Kaltura entries: { id, name, duration, createdAt, srt }
  * @param {Array}  args.files    Canvas file objects: { id, display_name, "content-type" }
+ * @param {string} [args.categoryId]  Gallery category (digits); the bare /media/t/<id> link is denied
  * @param {Date}   [args.now]
  */
-export function buildSyncPayload({ course, entries, files, now = new Date() }) {
+export function buildSyncPayload({ course, entries, files, categoryId, now = new Date() }) {
   const payload = {
     schema_version: "1",
     synced_at: now.toISOString(),
@@ -35,7 +36,7 @@ export function buildSyncPayload({ course, entries, files, now = new Date() }) {
           entry_id: e.id,
           title: e.name,
           duration_sec: Number(e.duration) || 0,
-          media_url: MEDIA_BASE + e.id,
+          media_url: MEDIA_BASE + e.id + (categoryId ? `/${categoryId}` : ""),
           captions_srt: e.srt,
         };
         const recorded = toIsoDate(e.createdAt);

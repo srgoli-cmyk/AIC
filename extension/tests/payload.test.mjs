@@ -21,6 +21,12 @@ test("skips lectures without captions and builds media url", () => {
   assert.equal(payload.lectures[0].recorded_at, "2026-10-12");
 });
 
+test("media url carries the category id when given", () => {
+  const withCat = buildSyncPayload({ ...raw, categoryId: "123456", now: new Date("2026-11-02T18:00:00Z") });
+  assert.equal(withCat.lectures[0].media_url, "https://canvaskaf.ucsd.edu/media/t/1_fake0001/123456");
+  assert.ok(!JSON.stringify(withCat).includes("SECRET"));
+});
+
 test("SECURITY: no secrets survive the mapping", () => {
   const text = JSON.stringify(payload);
   assert.ok(!text.includes("SECRET"), "a secret leaked into the payload");

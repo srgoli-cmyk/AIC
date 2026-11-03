@@ -19,6 +19,7 @@ Rules:
 - Unknown fields are rejected with `422`. This is deliberate: it guarantees that tokens or cookies can never be stored by accident.
 - Re-syncing the same course is idempotent: lectures are upserted by `entry_id`.
 - `files: []` on a re-sync leaves stored files alone and never deletes them. Only a non-empty `files` list upserts, by `canvas_file_id`.
+- `media_url` is `https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId>`. Without the category the page answers "Access denied".
 - A lecture already stored under a different course is left untouched and counted in `lectures_skipped_other_course`.
 
 Response `200`:
@@ -50,7 +51,7 @@ Body:
 Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources[].start_sec` / `end_sec` are seconds from the start of the lecture.
 - `sources[].timestamp` is `mm:ss` (or `h:mm:ss`) of `start_sec`.
-- `sources[].url` opens the lecture page; time-jump support is still to be verified.
+- `sources[].url` is the lecture's `media_url` plus `?st=<seconds>`, where seconds is `max(0, floor(start_sec) - 3)`, so playback starts a few seconds before the cited passage.
 
 - `answer` is Markdown with LaTeX (`$...$`, `$$...$$`) that explains the topic, using the course's captions as its main source. It may use general math knowledge to explain, but only what the captions say is cited, as `[Lecture N, m:ss]`. A lecture with no number is cited by its title. An `answer` can carry text from captions, so a client must not render links, images or HTML from it, other than citations it builds from `sources`.
 - `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.

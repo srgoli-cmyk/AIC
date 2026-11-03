@@ -182,6 +182,7 @@ export async function runSync(deps) {
   let titleFallbacks = 0;
   let storedBefore = new Map();
   let tab;
+  let categoryId; // the gallery the listed entries came from; set once the list is read
   try {
     try {
       tab = await tabs.create({ url: galleryUrl, active: false });
@@ -194,6 +195,7 @@ export async function runSync(deps) {
     let frame = await waitForCategory(deps, tab.id);
     const gallery = await readGallery(deps, tab.id, frame);
     frame = gallery.frame;
+    categoryId = CATEGORY_ID.test(String(frame.categoryId)) ? String(frame.categoryId) : undefined;
     if (gallery.partial) notes.push(`The gallery list may be incomplete (${gallery.partial}).`);
 
     storedBefore = new Map((await getLectures(fetchFn, backendUrl, courseId)).map((l) => [l.entry_id, l.has_captions]));
@@ -263,7 +265,7 @@ export async function runSync(deps) {
   if (titleFallbacks) notes.push(`${titleFallbacks} lecture titles come from the page title and have no duration.`);
 
   report({ stage: "sending", done: 0, total: 0 });
-  const payload = buildSyncPayload({ course, entries, files, now: new Date(now()) });
+  const payload = buildSyncPayload({ course, entries, files, categoryId, now: new Date(now()) });
   const reply = await postSync(fetchFn, backendUrl, payload);
   if (reply.skippedOtherCourse) {
     notes.push(`${reply.skippedOtherCourse} lectures already belong to another course and were left unchanged.`);

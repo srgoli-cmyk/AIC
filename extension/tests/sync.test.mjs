@@ -36,7 +36,7 @@ test("full flow: new entries are read and sent; summary has counts", async () =>
   assert.deepEqual(posted.lectures.map((l) => l.entry_id), [A, B, C]);
   assert.equal(posted.lectures[0].captions_srt, SRT);
   assert.equal(posted.lectures[0].title, `Lecture ${A}`);
-  assert.equal(posted.lectures[0].media_url, `https://canvaskaf.ucsd.edu/media/t/${A}`);
+  assert.equal(posted.lectures[0].media_url, `https://canvaskaf.ucsd.edu/media/t/${A}/${CAT}`);
   assert.deepEqual(posted.files, [{ canvas_file_id: 7, name: "Notes.pdf", content_type: "application/pdf" }]);
   assert.equal(tabs.state.created.length, 1);
   assert.deepEqual(tabs.state.created[0].active, false);

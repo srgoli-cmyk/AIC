@@ -73,6 +73,26 @@ def _sync(payload=SAMPLE):
     assert client.post("/sync", json=payload).status_code == 200
 
 
+# --- source links ---
+
+BASE = "https://canvaskaf.ucsd.edu/media/t/1_a"
+
+
+def test_source_url_with_and_without_a_category():
+    assert answer.source_url(f"{BASE}/111111", 60.0) == f"{BASE}/111111?st=57"
+    assert answer.source_url(BASE, 60.0) == f"{BASE}?st=57"
+
+
+@pytest.mark.parametrize("start, st", [(4.5, 1), (127.9, 124), (3.0, 0)])
+def test_source_url_rounds_down_then_subtracts_three(start, st):
+    assert answer.source_url(BASE, start) == f"{BASE}?st={st}"
+
+
+@pytest.mark.parametrize("start", [0.0, 1.5, 2.9])
+def test_source_url_is_never_negative(start):
+    assert answer.source_url(BASE, start) == f"{BASE}?st=0"
+
+
 # --- retrieval helpers ---
 
 
@@ -592,13 +612,22 @@ def test_sync_then_ask_returns_cited_sources_in_the_contract_shape(llm, fake_mod
         assert set(source) == set(ASK_SAMPLE["sources"][0])
     first = next(s for s in body.sources if s.entry_id == "1_fake0001")
     assert (first.start_sec, first.end_sec, first.timestamp) == (0.0, 30.0, "0:00")
-    assert first.url == SAMPLE["lectures"][0]["media_url"]
+    assert first.url == SAMPLE["lectures"][0]["media_url"] + "?st=0"
     assert first.lecture_title == SAMPLE["lectures"][0]["title"]
     assert first.snippet.startswith("Okay, today we look at derivatives")
     # The question was embedded with the instruction prefix.
     assert fake_model.texts[-1] == embeddings.QUERY_PREFIX + "What is the product rule?"
     # The prompt carries the passages with their exact citation labels.
     assert "[Lecture 8, 0:00]" in llm.user_prompt and "[Lecture 8, 1:00]" in llm.user_prompt
+
+
+@pytest.mark.integration
+def test_a_later_passage_links_three_seconds_before_it_starts(llm):
+    _sync()
+    llm.reply = "Covered in [Lecture 8, 1:00]."
+    (source,) = _ask(top_k=8).json()["sources"]
+    assert source["start_sec"] == 60.0  # fixture passage at 1:00
+    assert source["url"] == SAMPLE["lectures"][0]["media_url"] + "?st=57"
 
 
 @pytest.mark.integration

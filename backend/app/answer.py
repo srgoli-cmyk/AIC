@@ -6,6 +6,7 @@ as an error type or an HTTP status only.
 """
 
 import logging
+import math
 import re
 import secrets
 import time
@@ -302,6 +303,11 @@ def _snippet(text: str) -> str:
     return (head or cut).rstrip()
 
 
+def source_url(media_url: str, start_sec: float) -> str:
+    """The lecture page, opened 3 s before the passage starts (never before 0)."""
+    return f"{media_url}?st={max(0, math.floor(start_sec) - 3)}"
+
+
 def _source(hit: db.ChunkHit) -> Source:
     return Source(
         lecture_title=hit.lecture_title,
@@ -309,7 +315,7 @@ def _source(hit: db.ChunkHit) -> Source:
         start_sec=hit.start_sec,
         end_sec=hit.end_sec,
         timestamp=format_timestamp(hit.start_sec),
-        url=hit.media_url,  # the lecture page; no time-jump
+        url=source_url(hit.media_url, hit.start_sec),
         snippet=_snippet(hit.text),
     )
 
