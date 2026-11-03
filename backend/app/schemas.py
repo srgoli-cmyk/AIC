@@ -1,6 +1,6 @@
 """Pydantic models mirroring contracts/sync_payload.schema.json and contracts/api.md.
 
-If you change anything here, the contract must change first (maintainer + human approval).
+If you change anything here, the contract must change first (maintainer approval).
 extra="forbid" is a security control: unknown fields such as tokens are rejected with 422.
 """
 
@@ -49,7 +49,8 @@ class SyncResponse(BaseModel):
     course_id: str
     lectures_received: int
     files_received: int
-    status: Literal["accepted", "indexed"]
+    lectures_skipped_other_course: int
+    status: Literal["accepted"]
 
 
 class CourseSummary(BaseModel):

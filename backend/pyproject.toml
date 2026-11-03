@@ -6,6 +6,10 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: needs a running Postgres (make db)",
+    "slow: loads the real embedding model (downloads it on first use)",
+]
 
 [tool.ruff]
 line-length = 100

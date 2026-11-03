@@ -61,7 +61,7 @@ function defaultRoutes() {
       if (ks === entryKs(assetId.replace("cap-", ""))) return text(SRT);
       return json({ objectType: "KalturaAPIException", code: "INVALID_KS", message: `bad ${ks}` });
     },
-    answers: ["78600", "TEST 1", "Synthetic"],
+    answers: ["999999", "TEST 1", "Synthetic"],
     pathname: `/media/t/${A}/${CAT}`,
     hostname: "canvaskaf.ucsd.edu",
   };
@@ -171,9 +171,9 @@ function assertMatchesContract(payload) {
 
 test("builds the same payload as extension/src/payload.js and matches the contract", async () => {
   const { payload, downloads } = await run();
-  assert.equal(downloads[0].name, "sync_78600.json");
+  assert.equal(downloads[0].name, "sync_999999.json");
   const expected = buildSyncPayload({
-    course: { id: 78600, course_code: "TEST 1", name: "Synthetic" },
+    course: { id: 999999, course_code: "TEST 1", name: "Synthetic" },
     entries: ALL.map((id) => ({ id, name: `Lecture ${id}`, duration: 60, createdAt: 1790000000, srt: SRT })),
     files: [],
     now: new Date(payload.synced_at),
@@ -537,9 +537,9 @@ test("a non-SRT serve logs only a code, never the body", async () => {
 // ---- Prompts
 
 test("asks for the course ID, code and name, and builds the course from them", async () => {
-  const { payload, asked } = await run({ answers: [" 78600 ", "MATH 20A", "Calculus"] });
+  const { payload, asked } = await run({ answers: [" 999999 ", "MATH 20A", "Calculus"] });
   assert.equal(asked.length, 3);
-  assert.deepEqual(payload.course, { canvas_course_id: 78600, code: "MATH 20A", name: "Calculus" });
+  assert.deepEqual(payload.course, { canvas_course_id: 999999, code: "MATH 20A", name: "Calculus" });
 });
 
 test("rejects a course ID that is not a positive integer", async () => {
@@ -552,7 +552,7 @@ test("rejects a course ID that is not a positive integer", async () => {
 });
 
 test("stops when a prompt is cancelled", async () => {
-  for (const answers of [[], ["78600"], ["78600", "TEST 1"]]) {
+  for (const answers of [[], ["999999"], ["999999", "TEST 1"]]) {
     const { downloads, log } = await run({ answers });
     assert.equal(downloads.length, 0);
     assert.match(log, /required/);

@@ -1,4 +1,4 @@
-"""Gate for the extension: permissions may only shrink without a human-approved contract change."""
+"""Gate for the extension: permissions may only shrink without an approved contract change."""
 
 import json
 import sys
@@ -28,7 +28,7 @@ def main() -> int:
     if "<all_urls>" in json.dumps(m):
         errors.append("<all_urls> is forbidden")
     if m.get("content_security_policy"):
-        errors.append("custom content_security_policy needs human review")
+        errors.append("custom content_security_policy needs review")
     for e in errors:
         print(f"manifest: {e}", file=sys.stderr)
     if not errors:

@@ -26,19 +26,22 @@ def test_health():
     assert client.get("/health").json() == {"status": "ok"}
 
 
+@pytest.mark.integration
 def test_sync_accepts_fixture():
     r = client.post("/sync", json=SAMPLE)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body == {
-        "course_id": "canvas-78600",
+        "course_id": "canvas-999999",
         "lectures_received": 2,
         "files_received": 1,
+        "lectures_skipped_other_course": 0,
         "status": "accepted",
     }
-    assert any(c["course_id"] == "canvas-78600" for c in client.get("/courses").json())
+    assert any(c["course_id"] == "canvas-999999" for c in client.get("/courses").json())
 
 
+@pytest.mark.integration
 def test_sync_accepts_empty_files_twice():
     """The console snippet always sends `files: []`; it must be valid, also on a re-sync."""
     payload = copy.deepcopy(SAMPLE)
@@ -48,7 +51,6 @@ def test_sync_accepts_empty_files_twice():
         r = client.post("/sync", json=payload)
         assert r.status_code == 200, r.text
         assert r.json()["files_received"] == 0
-    # NOTE: "stored files are left alone" is not tested here; /sync stores nothing until step 2.
 
 
 def test_api_md_documents_empty_files_rule():
@@ -91,7 +93,8 @@ def test_ask_response_fixture_matches_model():
     AskResponse.model_validate(ASK_SAMPLE)
 
 
+@pytest.mark.integration
 def test_ask_is_stubbed_until_step_4():
     client.post("/sync", json=SAMPLE)
-    r = client.post("/ask", json={"course_id": "canvas-78600", "question": "product rule?"})
+    r = client.post("/ask", json={"course_id": "canvas-999999", "question": "product rule?"})
     assert r.status_code == 501

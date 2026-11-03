@@ -14,14 +14,16 @@ even if the extension slips (sync can be demoed with the console snippet).
   the course and downloads the payload (same mapping as `extension/src/payload.js`).
   Done when: running it on MATH 20A downloads a payload that passes `scripts/validate_payload.py`.
 
-- [ ] **2. Store syncs in Postgres** (backend). `/sync` upserts course, lectures, files;
+- [x] **2. Store syncs in Postgres** (backend). `/sync` upserts course, lectures, files;
   `/courses` reads from DB. Idempotent by `entry_id`.
   Done when: integration test syncs the fixture twice and gets one course with 2 lectures; a
   re-sync with `files: []` keeps stored files; a non-empty list upserts by `canvas_file_id`.
 
-- [ ] **3. Ingestion** (backend). SRT parser, chunking into ~45-60 s windows with
-  start/end seconds, embeddings into `chunks`. Runs after `/sync`; status becomes `indexed`.
-  Done when: unit tests for parser and chunker; fixture produces chunks with correct timestamps.
+- [x] **3. Ingestion** (backend). SRT parser, chunking into ~45-60 s windows with
+  start/end seconds, embeddings into `chunks`. Runs in the background after `/sync`; the course's
+  `indexed` becomes true when all its lectures are chunked.
+  Done when: unit tests for parser and chunker; fixture produces chunks with correct timestamps;
+  syncing the fixture via `make dev` ends with `indexed: true`.
 
 - [ ] **4. /ask** (backend). Embed question, top-k by cosine, prompt OpenRouter to answer
   only from the chunks with `[Lecture, m:ss]` citations, return `sources[]`.
@@ -40,3 +42,4 @@ Open questions
   the Media Gallery tab first.
 
 Later (after the demo): quizzes, lecture summaries, slide matching, YouTube and website cards.
+Many-to-many course_lectures if a lecture appears in several courses.

@@ -1,7 +1,7 @@
 {
   "_comment": "Synthetic raw shapes as returned by the Canvas API and Kaltura. Includes fields that MUST be dropped (tokens, urls with verifiers).",
   "course": {
-    "id": 78600,
+    "id": 999999,
     "course_code": "MATH 20A",
     "name": "Calculus for Science and Engineering",
     "term": { "name": "FA26" },
