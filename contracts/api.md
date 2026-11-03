@@ -50,7 +50,7 @@ Body:
 Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources[].start_sec` / `end_sec` are seconds from the start of the lecture.
 - `sources[].timestamp` is `mm:ss` (or `h:mm:ss`) of `start_sec`.
-- `sources[].url` opens the lecture page; time-jump support is still to be verified (see roadmap).
+- `sources[].url` opens the lecture page; time-jump support is still to be verified.
 
 - `answer` is Markdown with LaTeX (`$...$`, `$$...$$`) that explains the topic, using the course's captions as its main source. It may use general math knowledge to explain, but only what the captions say is cited, as `[Lecture N, m:ss]`. A lecture with no number is cited by its title. An `answer` can carry text from captions, so a client must not render links, images or HTML from it, other than citations it builds from `sources`.
 - `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.
