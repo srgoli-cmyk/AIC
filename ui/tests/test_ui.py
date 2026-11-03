@@ -1,5 +1,6 @@
 """Runs the page headless with the backend calls mocked; nothing here uses the network."""
 
+import re
 from pathlib import Path
 
 import httpx
@@ -105,8 +106,9 @@ def test_asks_selected_course_and_shows_answer_and_linked_sources(backend):
     assert backend["asked"] == [
         ("http://backend.test/ask", {"course_id": "canvas-1", "question": "what is it?"})
     ]
-    assert ANSWER["answer"] in texts(page)
-    assert "[Lecture 8, 0\\:04](https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa)" in markdown(page)
+    link = "[Lecture 8, 0\\:04](https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa)"
+    assert link in markdown(page)  # in the sources
+    assert f"Use the product rule {link}." in markdown(page)  # and in the answer
 
 
 def test_snippet_is_shown_as_plain_text_not_markup(backend):
@@ -116,13 +118,174 @@ def test_snippet_is_shown_as_plain_text_not_markup(backend):
     assert not page.caption
 
 
-def test_answer_is_shown_as_plain_text_not_markup(backend):
-    answer = "[click](https://evil.example) https://evil.example\n==="
-    backend["ask"] = response(payload={"answer": answer, "sources": []})
+def test_injected_link_in_the_answer_is_stripped_and_citation_kept(backend):
+    answer = "See [click](https://evil.example) and https://evil.example [Lecture 8, 0:04]."
+    backend["ask"] = response(payload={"answer": answer, "sources": [SOURCE]})
     page = ask(run_page())
-    assert answer in texts(page)
     assert not any("evil.example" in m for m in markdown(page))
+    assert any(
+        m.startswith("See click and")
+        and "[Lecture 8, 0\\:04](https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa)" in m
+        for m in markdown(page)
+    )
+
+
+def test_answer_is_rendered_as_markdown_without_raw_html(backend):
+    backend["ask"] = response(payload={"answer": "**Step 1:** $x^2$ <b>hi</b>", "sources": []})
+    page = ask(run_page())
+    shown = next(m for m in page.markdown if "Step 1" in m.value)
+    assert shown.value == "**Step 1:** $x^2$ \\<b>hi\\</b>"
+    assert shown.allow_html is False
     assert [s.value for s in page.subheader] == ["Answer"]
+
+
+def _links(answer, sources=()):
+    return logic.answer_markdown(answer, list(sources))
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "[click](https://evil.example)",
+        "[click](https://evil.example 'title')",
+        "[click](<https://evil.example>)",
+        "[click](javascript:alert(1))",
+        "[click](&#104;ttps://evil.example)",
+        "![img](https://evil.example/x.png)",
+        "[![img](https://evil.example/x.png)](https://evil.example)",
+        "[[nested]](https://evil.example)",
+        "<https://evil.example>",
+        "<mailto:a@evil.example>",
+        "https://evil.example/a_b",
+        "HTTP://EVIL.EXAMPLE",
+        "www.evil.example",
+        "a@evil.example",
+        "$[click](https://evil.example)$",
+        "\\[click\\](https://evil.example)",
+        "see https\\://evil.example/g",
+        "see https&#58;//evil.example/h",
+        "see https&amp;#58;//evil.example/h2",
+        "see www\\.evil.example/i",
+        "see www&#46;evil.example/j",
+        "mail a&#64;evil.example",
+        "mail a\\@evil.example",
+        "see https:a@b.c//evil.example/k",
+        "mailto:a@evil.example",
+        "[\\<foo@evil.example>] end",
+    ],
+)
+def test_no_form_of_link_or_image_survives(answer):
+    out = _links(answer)
+    assert "evil.example" not in out
+    assert "javascript" not in out
+    assert "](" not in out
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "[a][ref]\n\n[ref]: https://evil.example",
+        "[a][ref]\n\n[ref]: /relative",
+        "[a]\n\n[a]: relative",
+        "[a](b(c(d(e))))",
+        "\\[a](b)",
+        "[a\\](b)",
+        "a $$\n\n![x][r] and [c][r]\n\n[r]: //evil.example/x.png\n\nb $$",
+        "a $$\n\n[c][r]\n\n[r]: https:other/x\n\nb $$",
+        "`$$`\n\n![x][r]\n\n[r]: //evil.example/c.png\n\n`$$`",
+        "```\n$$\n```\n\n[c][r]\n\n[r]: //evil.example/e\n\n```\n$$\n```",
+    ],
+)
+def test_leftover_link_syntax_has_only_escaped_brackets(answer):
+    out = _links(answer)
+    assert "evil.example" not in out
+    assert not re.search(r"(?<!\\)[\[\]]", out)
+
+
+def test_citation_with_a_forged_target_goes_to_the_checked_url():
+    out = _links("[Lecture 8, 0:04](https://evil.example) [Lecture 8, 0:04]", [SOURCE])
+    assert "evil.example" not in out
+    assert out.endswith("[Lecture 8, 0\\:04](https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa)")
+
+
+def test_citation_of_a_source_with_a_bad_url_is_not_a_link():
+    source = {**SOURCE, "url": "https://evil.example/media/t/1_a"}
+    out = _links("Said [Lecture 8, 0:04].", [source])
+    assert "evil.example" not in out and "](" not in out
+
+
+def test_other_brackets_stay_visible_but_are_not_markup():
+    assert _links("On [a, b] and [Lecture 9, 1:00].") == r"On \[a, b\] and \[Lecture 9, 1:00\]."
+
+
+def test_a_bang_before_a_citation_does_not_make_an_image():
+    out = _links("look ![Lecture 8, 0:04] here", [SOURCE])
+    assert "\\![Lecture 8" in out
+
+
+def test_a_link_inside_what_looks_like_math_cannot_form():
+    """If the renderer reads the span as text, no `][`, `](`, `]:` or tag remains."""
+    out = _links("$[a][r]$ and $[b](c)$ and $<b>$", [])
+    assert "][" not in out and "](" not in out and "<b" not in out
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["$https://evil.example$", "$a@evil.example$", "$www.evil.example$", "$a&#64;evil.example$"],
+)
+def test_a_url_inside_what_looks_like_math_is_removed(answer):
+    assert "evil.example" not in _links(answer)
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("On $[a, b]$ we get $x<y$.", "On $[a, b] $ we get $x< y$."),
+        ("$[f,g](x) = 1$", "$[f,g] (x) = 1$"),
+        ("$n![a+b](c)$", "$n![a+b] (c)$"),
+        ("$$\n\\int_a^b [f(x)]\\,dx\n$$", "$$\n\\int_a^b [f(x)] \\,dx\n$$"),
+        ("So \\(x^2\\) and \\[y^2\\].", "So $x^2$ and $$y^2$$."),
+        ("$$a \\\\[4pt] b$$ and \\[ c \\]", "$$a \\\\[4pt]  b$$ and $$ c $$"),
+        ("It costs \\$5 on [a].", "It costs \\$5 on \\[a\\]."),
+        ("It costs $5 and then $6 more.", "It costs \\$5 and then \\$6 more."),
+        ("$a\\$b$ next", "\\$a\\$b\\$ next"),
+    ],
+)
+def test_math_keeps_its_meaning_and_other_dollars_are_text(answer, expected):
+    assert _links(answer) == expected
+
+
+def test_currency_does_not_swallow_a_citation():
+    out = _links("It costs $5 [Lecture 8, 0:04] and then $6 more.", [SOURCE])
+    assert "(https://canvaskaf.ucsd.edu/media/t/1_aaaaaaaa)" in out
+
+
+def test_code_is_shown_as_text():
+    assert _links("`a[0] < b`") == r"\`a\[0\] \< b\`"
+
+
+def test_markdown_formatting_survives():
+    text = (
+        "### Step 1\n\n**Bold** and *italic*\n\n1. one\n2. two\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+    )
+    assert _links(text) == text
+
+
+@pytest.mark.parametrize(
+    ("title", "timestamp", "citation"),
+    [
+        ("Review [part 2]", "1:15", "Review part 2, 1:15"),
+        ("Double  Space", "2:00", "Double Space, 2:00"),
+    ],
+)
+def test_a_title_links_in_the_form_the_backend_cites(title, timestamp, citation):
+    source = {**SOURCE, "lecture_title": title, "timestamp": timestamp}
+    assert f"({SOURCE['url']})" in _links(f"Said [{citation}].", [source])
+
+
+def test_a_title_cannot_become_a_link_in_its_label():
+    source = {**SOURCE, "lecture_title": "www.evil.example", "url": "https://evil.example/x"}
+    assert "evil" not in logic.source_link(source)
 
 
 def test_question_is_shown_with_its_answer(backend):
@@ -141,7 +304,7 @@ def test_blank_question_is_not_sent(backend):
     page = ask(page, "   ")
     assert len(backend["asked"]) == 1
     assert "Type a question" in page.warning[0].value
-    assert ANSWER["answer"] in texts(page)  # the previous answer stays
+    assert any(m.startswith("Use the product rule") for m in markdown(page))  # the answer stays
 
 
 def test_answer_is_hidden_after_switching_course(backend):

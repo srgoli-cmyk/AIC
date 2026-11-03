@@ -1,5 +1,6 @@
 """Backend calls and display helpers for the Streamlit page."""
 
+import html
 import re
 
 import httpx
@@ -71,18 +72,117 @@ def course_label(course: dict) -> str:
 def source_label(source: dict) -> str:
     """'Lecture N, m:ss', or the title when the lecture has no number."""
     match = re.search(r"\bLecture\s+(\d+)", source["lecture_title"], re.IGNORECASE)
-    name = f"Lecture {int(match.group(1))}" if match else source["lecture_title"]
+    # The same form the backend cites: no brackets, single spaces.
+    title = " ".join(re.sub(r"[\[\]]", " ", source["lecture_title"]).split())
+    name = f"Lecture {int(match.group(1))}" if match else title
     return f"{name}, {source['timestamp']}"
 
 
 def escape_markdown(text: str) -> str:
     """Keeps a lecture title from acting as markup inside a source link's label."""
-    return re.sub(r"([\\`*_{}\[\]()<>#+\-.!|~$:])", r"\\\1", text)
+    return re.sub(r"([\\`*_{}\[\]()<>#+\-.!|~$:&])", r"\\\1", text)
 
 
 def source_link(source: dict) -> str:
-    label = escape_markdown(source_label(source))
+    label = escape_markdown(_without_links(source_label(source), {}))
     url = source["url"]
     if not SOURCE_URL.fullmatch(url):
         return label
     return f"[{label}]({url})"
+
+
+# --- the answer as Markdown ---
+#
+# An answer can carry text from captions, so it is untrusted. Outside math, every link form is
+# removed from the decoded text, because the renderer finds bare URLs after decoding, and then all
+# syntax that could start a link, image, tag, code span or math is escaped. Emphasis, lists,
+# headings and tables still work. Code is shown as text, so nothing can hide in fake code.
+
+_DELIMITED_INLINE = re.compile(r"(?<!\\)\\\((.+?)(?<!\\)\\\)", re.DOTALL)
+_DELIMITED_DISPLAY = re.compile(r"(?<!\\)\\\[(.+?)(?<!\\)\\\]", re.DOTALL)
+# A closing `$` never sits after a space or before a digit, so "$5 and $6" stays text.
+_MATH = re.compile(
+    r"(?<![\\$])\$\$[^$]+?(?<!\\)\$\$(?!\$)|(?<![\\$])\$(?![\s$])[^$\n]*?(?<![\s\\])\$(?![\d$])"
+)
+_NOT_MATH = re.compile(r"://|www\.|@|&#?\w+;|\n\s*\n", re.IGNORECASE)
+_BACKSLASH_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+_LINK_OR_IMAGE = re.compile(r"(!?)\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\((?:[^()]|\([^()]*\))*\)")
+_URL_FORMS = (
+    re.compile(r"(?:[a-z][a-z0-9+.-]*:)?//[^\s\[\]]+", re.IGNORECASE),
+    re.compile(r"www\.[^\s\[\]]*", re.IGNORECASE),
+    re.compile(r"[^\s\[\]<>()]*@[^\s\[\]<>()]+"),
+)
+_CITATION = re.compile(r"\[([^\[\]\n]*)\]")
+_SYNTAX = re.compile(r"[\\\[\]<!&`$]")
+
+
+def _without_links(text: str, citations: dict[str, str]) -> str:
+    """Decodes the text and removes links, images and URLs, until nothing more changes: removing
+    one can reveal another."""
+
+    def replace(match: re.Match) -> str:
+        if match.group(1):
+            return ""
+        return f"[{match.group(2)}]" if match.group(2) in citations else match.group(2)
+
+    previous = None
+    while text != previous:
+        previous = text
+        text = _BACKSLASH_ESCAPE.sub(r"\1", html.unescape(text))
+        # Before URLs, which would otherwise take a link's closing parenthesis with them.
+        linked = None
+        while text != linked:
+            linked = text
+            text = _LINK_OR_IMAGE.sub(replace, text)
+        for pattern in _URL_FORMS:
+            text = pattern.sub("", text)
+    return text
+
+
+def _escaped(text: str) -> str:
+    return _SYNTAX.sub(lambda m: "\\" + m.group(), text)
+
+
+def _safe_text(text: str, citations: dict[str, str]) -> str:
+    """Text outside math. The only links in the result are the citations' own."""
+    text = _without_links(text, citations)
+    parts: list[str] = []
+    end = 0
+    for match in _CITATION.finditer(text):
+        if match.group(1) in citations:
+            parts += [_escaped(text[end : match.start()]), citations[match.group(1)]]
+            end = match.end()
+    parts.append(_escaped(text[end:]))
+    return "".join(parts)
+
+
+def _safe_math(span: str) -> str:
+    """Spaces are ignored in TeX, and they stop `][`, `](`, `]:` and `<tag` from meaning anything
+    in case the renderer reads this span as text."""
+    return span.replace("]", "] ").replace("<", "< ")
+
+
+def answer_markdown(answer: str, sources: list[dict]) -> str:
+    """The answer, safe to render: its only links are citations of `sources`, built from their
+    checked URLs. Math keeps its brackets, so `$[a, b]$` still renders."""
+    citations: dict[str, str] = {}
+    for source in sources:
+        citations.setdefault(source_label(source), source_link(source))
+
+    def delimited(template: str):
+        def convert(match: re.Match) -> str:
+            is_citation = match.group(1).strip() in citations
+            return f"[{match.group(1)}]" if is_citation else template.format(match.group(1))
+
+        return convert
+
+    text = _DELIMITED_INLINE.sub(delimited("${}$"), answer)
+    text = _DELIMITED_DISPLAY.sub(delimited("$${}$$"), text)
+    parts: list[str] = []
+    end = 0
+    for match in _MATH.finditer(text):
+        if not _NOT_MATH.search(_BACKSLASH_ESCAPE.sub(r"\1", match.group())):
+            parts += [_safe_text(text[end : match.start()], citations), _safe_math(match.group())]
+            end = match.end()
+    parts.append(_safe_text(text[end:], citations))
+    return "".join(parts)

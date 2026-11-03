@@ -59,10 +59,11 @@ if submitted:
 result = st.session_state.get("result")
 if result and result["course_id"] == course_id:
     st.subheader("Answer")
-    # Answers and snippets come from captions, so they are shown as plain text, never as markup.
     st.text(f"Q: {result['question']}")
-    st.text(result["answer"]["answer"])
     sources = result["answer"]["sources"]
+    # The answer is Markdown with LaTeX. It can carry text from captions, so answer_markdown
+    # removes every link and image except the citations, and raw HTML stays off.
+    st.markdown(logic.answer_markdown(result["answer"]["answer"], sources), unsafe_allow_html=False)
     if sources:
         st.subheader("Sources")
     for source in sources:
