@@ -18,6 +18,7 @@ from .schemas import (
     AskRequest,
     AskResponse,
     CourseSummary,
+    LectureStatus,
     SyncPayload,
     SyncResponse,
 )
@@ -129,6 +130,13 @@ def answer_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
 @app.exception_handler(answer.SearchUnavailable)
 def search_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": "search service unavailable"})
+
+
+@app.get("/courses/{course_id}/lectures", response_model=list[LectureStatus])
+def course_lectures(course_id: str) -> list[LectureStatus]:
+    if not db.course_exists(course_id):
+        raise HTTPException(status_code=404, detail="course not synced")
+    return db.list_lecture_statuses(course_id)
 
 
 @app.post("/ask", response_model=AskResponse)

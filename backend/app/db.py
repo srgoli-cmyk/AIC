@@ -43,7 +43,7 @@ from sqlalchemy.pool import NullPool
 from . import chunking
 from .chunking import Chunk as ChunkData
 from .config import settings
-from .schemas import CourseSummary, SyncPayload, course_id_for
+from .schemas import CourseSummary, LectureStatus, SyncPayload, course_id_for
 from .titles import parse_title
 
 log = logging.getLogger("aic")
@@ -364,6 +364,20 @@ def list_courses() -> list[CourseSummary]:
         CourseSummary(course_id=r[0], code=r[1], name=r[2], lectures=r[3], indexed=r[4])
         for r in rows
     ]
+
+
+def list_lecture_statuses(course_id: str) -> list[LectureStatus]:
+    """Each stored lecture of the course with whether it has captions, ordered by entry_id. The
+    caption text itself is never loaded: Postgres computes the flag."""
+    ensure_schema()
+    has_captions = (func.coalesce(func.length(Lecture.captions_srt), 0) > 0).label("has_captions")
+    stmt = (
+        select(Lecture.entry_id, has_captions)
+        .where(Lecture.course_id == course_id)
+        .order_by(Lecture.entry_id.collate("C"))
+    )
+    with Session(engine) as session:
+        return [LectureStatus(entry_id=r[0], has_captions=r[1]) for r in session.execute(stmt)]
 
 
 def course_exists(course_id: str) -> bool:

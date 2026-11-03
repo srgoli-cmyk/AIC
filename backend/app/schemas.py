@@ -61,6 +61,11 @@ class CourseSummary(BaseModel):
     indexed: bool
 
 
+class LectureStatus(BaseModel):
+    entry_id: str
+    has_captions: bool
+
+
 class AskRequest(_Strict):
     course_id: str = Field(min_length=1)
     question: str = Field(min_length=1, max_length=2000)

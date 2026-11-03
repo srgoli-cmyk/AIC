@@ -22,6 +22,17 @@ def test_fixture_matches_json_schema():
     jsonschema.validate(SAMPLE, SCHEMA, format_checker=jsonschema.FormatChecker())
 
 
+def test_openapi_reports_the_app_title_the_extension_checks():
+    assert client.get("/openapi.json").json()["info"]["title"] == "AI Lecture Search"
+
+
+def test_api_md_documents_the_openapi_title_check():
+    """Guard: the extension relies on this title, so the contract must keep documenting it."""
+    text = " ".join((ROOT / "contracts/api.md").read_text().split())
+    assert "## GET /openapi.json" in text
+    assert "`info.title` is `AI Lecture Search`" in text
+
+
 def test_health():
     assert client.get("/health").json() == {"status": "ok"}
 
@@ -58,6 +69,13 @@ def test_api_md_documents_empty_files_rule():
     text = " ".join((ROOT / "contracts/api.md").read_text().split())
     assert "`files: []` on a re-sync leaves stored files alone and never deletes them" in text
     assert "Only a non-empty `files` list upserts, by `canvas_file_id`" in text
+
+
+def test_api_md_documents_the_lectures_endpoint():
+    """Guard: the endpoint and its response shape must not be dropped from the contract."""
+    text = " ".join((ROOT / "contracts/api.md").read_text().split())
+    assert "## GET /courses/{course_id}/lectures" in text
+    assert '[{"entry_id": "1_fake0001", "has_captions": true}]' in text
 
 
 @pytest.mark.parametrize(

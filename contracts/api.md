@@ -6,6 +6,9 @@ Any change here must update `sync_payload.schema.json`, the fixtures and both si
 
 Base URL in development: `http://localhost:8000`
 
+## GET /openapi.json
+FastAPI's schema. `info.title` is `AI Lecture Search`; the extension checks this before sending course data, because another app can hold the port and answer `/health`.
+
 ## GET /health
 Response `200`: `{"status": "ok"}`
 
@@ -29,6 +32,13 @@ Response `200`:
 ```json
 [{"course_id": "canvas-999999", "code": "MATH 20A", "name": "Calculus for Science and Engineering", "lectures": 22, "indexed": true}]
 ```
+
+## GET /courses/{course_id}/lectures
+Lets a client skip lectures that are already stored. Response `200`, ordered by `entry_id`:
+```json
+[{"entry_id": "1_fake0001", "has_captions": true}]
+```
+`has_captions` is `true` when the lecture has stored captions. Lectures with no captions are not stored, so an entry missing from this list has none yet. A synced course with no lectures returns `[]`. `404`: the course is not synced.
 
 ## POST /ask
 Body:

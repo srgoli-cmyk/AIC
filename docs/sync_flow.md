@@ -6,8 +6,9 @@ Unless marked untested, each step below has been seen working.
 1. **Canvas REST API** works from a page on canvas.ucsd.edu with the student's session cookies:
    `/api/v1/courses/:id`, `/api/v1/courses/:id/files`. It is CORS-blocked from a canvaskaf.ucsd.edu
    page, which is why `scripts/console_sync.js` asks for the course details and sends `files: []`.
-   In the extension, call it from the background worker (`host_permissions`, so no CORS). Untested,
-   verify in step 6.
+   The extension calls it from the background worker with the student's cookies
+   (`host_permissions`, so no CORS; not yet proven live). Any failure reading files gives `files: []`
+   and a note; a failing course call stops the sync with a "log in to Canvas" message.
 
 2. **Entry IDs** come from the channel's gallery pages, not the Kaltura list API. The category ID
    is in the lecture URL, `/media/t/<entryId>/<categoryId>`. Fetch
@@ -37,10 +38,27 @@ Unless marked untested, each step below has been seen working.
      some work: one sample gave `INVALID_ACTIONS_LIMIT`, `INVALID_KS` and one valid SRT.
    - Try candidates of the same length as the page KS first, then the rest, at most 6. Use the first
      whose serve returns text containing `-->`, for that entry only.
-   - In the extension, fetch each lecture page from the background or content script. No hidden tabs
-     are needed. Untested, verify in step 6, including where the 4-character prefix comes from when
-     no player is open.
+   - The extension does this in the canvaskaf frame of a background tab, one injected call per entry
+     (not yet proven live). With no player open there is no page KS, so the prefix is the constant
+     `djJ8` (Kaltura v2 sessions, base64 of "v2|"), and candidates of the same length as the last one
+     that worked go first. The title comes from `baseentry/action/get` with the working KS, falling
+     back to the page `<title>` with duration 0. Both are assumptions to confirm on a live sync.
 
 5. **Every KS stays in the browser.** None is logged, stored or returned, and the output is checked
    against every KS seen during the run. Only the SRT text goes into the payload. On a non-SRT
-   response, log only the Kaltura error code (or "empty"), never the body.
+   response, log only the Kaltura error code (or "empty"), never the body. The extension checks each
+   entry's result against the sessions seen on its page, also refuses to POST a KS-shaped string, and
+   keeps only counts, the course ID, timestamps, status codes and fixed notes in storage.
+
+## Finding the gallery from the extension
+Not yet proven live.
+- `GET /api/v1/courses/:id/tabs`, match the tab labelled "Media Gallery" (case-insensitive, no
+  hardcoded tool ID), open its `full_url` in a background tab to trigger the LTI launch, and always
+  close that tab afterwards.
+- In the canvaskaf frame, poll up to 30 s for `/channel/<x>/<digits>` in the location, or the most
+  frequent category in `/media/t/<entryId>/<digits>` links. On timeout, ask the user to open the Media
+  Gallery tab once.
+- `GET /courses/{course_id}/lectures` tells which entries are already stored with captions; only the
+  others are fetched.
+- Before any course data leaves the browser, `/openapi.json` must report the title
+  "AI Lecture Search", because another app can hold the backend's port and answer `/health`.
