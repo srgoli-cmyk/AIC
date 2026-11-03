@@ -1,7 +1,7 @@
 # API contract (v1)
 
 This file is the single source of truth between the extension and the backend.
-Only the captain changes it, and only after the human approves the change.
+Only the maintainer changes it, and only after the human approves the change.
 Any change here must update `sync_payload.schema.json`, the fixtures and both sides' tests in the same PR.
 
 Base URL in development: `http://localhost:8000`
@@ -15,6 +15,7 @@ Body: `SyncPayload`, see `sync_payload.schema.json`. Example: `fixtures/sync_sam
 Rules:
 - Unknown fields are rejected with `422`. This is deliberate: it guarantees that tokens or cookies can never be stored by accident.
 - Re-syncing the same course is idempotent: lectures are upserted by `entry_id`.
+- `files: []` on a re-sync leaves stored files alone and never deletes them. Only a non-empty `files` list upserts, by `canvas_file_id`.
 
 Response `200`:
 ```json

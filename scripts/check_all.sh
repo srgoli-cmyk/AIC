@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# All automated gates. Every agent runs this before saying "done"; CI-style, fails fast.
+# All automated gates. Run this before saying "done"; CI-style, fails fast.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,5 +20,9 @@ python3 scripts/check_manifest.py
 
 echo "== extension: payload matches the contract"
 node extension/tests/emit_payload.mjs | python3 scripts/validate_payload.py
+
+echo "== scripts: console sync snippet (mocked network)"
+node --check scripts/console_sync.js
+node --test scripts/console_sync.test.mjs
 
 echo "ALL CHECKS PASSED"

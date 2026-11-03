@@ -20,9 +20,8 @@ contracts/   API contract + JSON schema + synthetic fixtures (source of truth)
 backend/     FastAPI, Postgres/pgvector, embeddings, OpenRouter
 extension/   Chrome MV3 extension (plain JS)
 scripts/     gates (check_all.sh), smoke test, helpers
-docs/        roadmap
-.claude/     Claude Code agents, hooks and settings
+docs/        roadmap, sync flow
 ```
 
 ## How we build it
-See `CLAUDE.md` (agent roles, workflow, rules) and `docs/roadmap.md` (steps and "done when").
+See `docs/roadmap.md` (steps and "done when").
