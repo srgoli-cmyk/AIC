@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aic.local/contracts/sync_payload.schema.json",
+  "title": "SyncPayload",
+  "description": "What the extension sends to POST /sync. Contains course content only: NEVER session tokens, cookies, Kaltura KS, grades or other students' data. additionalProperties=false everywhere is a security control, not a style choice.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "synced_at", "course", "lectures", "files"],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "synced_at": { "type": "string", "format": "date-time" },
+    "course": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canvas_course_id", "code", "name"],
+      "properties": {
+        "canvas_course_id": { "type": "integer", "minimum": 1 },
+        "code": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "term": { "type": "string", "maxLength": 50 }
+      }
+    },
+    "lectures": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "entry_id", "title", "duration_sec", "media_url", "captions_srt"],
+        "properties": {
+          "source": { "const": "kaltura" },
+          "entry_id": { "type": "string", "pattern": "^[0-9]_[a-z0-9]{8}$" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "recorded_at": { "type": "string", "format": "date" },
+          "duration_sec": { "type": "number", "minimum": 0 },
+          "media_url": { "type": "string", "format": "uri", "pattern": "^https://canvaskaf\\.ucsd\\.edu/media/" },
+          "captions_srt": { "type": "string", "minLength": 1, "maxLength": 2000000 }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["canvas_file_id", "name"],
+        "properties": {
+          "canvas_file_id": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "content_type": { "type": "string", "maxLength": 100 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "_comment": "Synthetic raw shapes as returned by the Canvas API and Kaltura. Includes fields that MUST be dropped (tokens, urls with verifiers).",
+  "course": {
+    "id": 78600,
+    "course_code": "MATH 20A",
+    "name": "Calculus for Science and Engineering",
+    "term": { "name": "FA26" },
+    "access_token_should_be_dropped": "SECRET"
+  },
+  "entries": [
+    {
+      "id": "1_fake0001",
+      "name": "Lecture 8 - Product and Quotient Rules (SYNTHETIC FIXTURE)",
+      "duration": 95,
+      "createdAt": 1791763200,
+      "ks": "SECRET_KALTURA_SESSION",
+      "srt": "1\n00:00:00,000 --> 00:00:04,500\nOkay, today we look at derivatives of products.\n"
+    },
+    {
+      "id": "1_fake0002",
+      "name": "Lecture without captions is skipped",
+      "duration": 10,
+      "createdAt": 1791936000,
+      "srt": ""
+    }
+  ],
+  "files": [
+    {
+      "id": 1001,
+      "display_name": "Lecture 8 (3.3, Product and Quotient Rules).pdf",
+      "content-type": "application/pdf",
+      "url": "https://canvas.ucsd.edu/files/1001/download?verifier=SECRET"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+# AI Lecture Search
+
+AISC project. A browser extension syncs a whole Canvas course (Kaltura lecture captions with
+timestamps + course files) into a private study space; answers cite the lecture and the minute.
+
+## Quick start
+```bash
+make setup          # venv + deps, creates .env from .env.example
+make db             # Postgres + pgvector in Docker (needed from step 2)
+make dev            # backend on http://localhost:8000  (docs at /docs)
+make check          # all automated gates
+make smoke          # end-to-end checks against the running backend
+```
+Extension: `chrome://extensions` > Developer mode > Load unpacked > select `extension/`,
+then open the popup and press "Check backend".
+
+## Layout
+```
+contracts/   API contract + JSON schema + synthetic fixtures (source of truth)
+backend/     FastAPI, Postgres/pgvector, embeddings, OpenRouter
+extension/   Chrome MV3 extension (plain JS)
+scripts/     gates (check_all.sh), smoke test, helpers
+docs/        roadmap
+.claude/     Claude Code agents, hooks and settings
+```
+
+## How we build it
+See `CLAUDE.md` (agent roles, workflow, rules) and `docs/roadmap.md` (steps and "done when").

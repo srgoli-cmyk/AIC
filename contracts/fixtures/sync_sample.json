@@ -1,0 +1,37 @@
+{
+  "schema_version": "1",
+  "synced_at": "2026-11-02T18:00:00Z",
+  "course": {
+    "canvas_course_id": 78600,
+    "code": "MATH 20A",
+    "name": "Calculus for Science and Engineering",
+    "term": "FA26"
+  },
+  "lectures": [
+    {
+      "source": "kaltura",
+      "entry_id": "1_fake0001",
+      "title": "Lecture 8 - Product and Quotient Rules (SYNTHETIC FIXTURE)",
+      "recorded_at": "2026-10-12",
+      "duration_sec": 95.0,
+      "media_url": "https://canvaskaf.ucsd.edu/media/t/1_fake0001",
+      "captions_srt": "1\n00:00:00,000 --> 00:00:04,500\nOkay, today we look at derivatives of products.\n\n2\n00:00:04,500 --> 00:00:11,000\nA common mistake is to say the derivative of f times g is f prime times g prime.\n\n3\n00:00:11,000 --> 00:00:19,000\nThat is wrong. The product rule says it is f prime times g plus f times g prime.\n\n4\n00:00:19,000 --> 00:00:30,000\nLet us check it on x squared times sine x. We get two x sine x plus x squared cosine x.\n\n5\n00:01:00,000 --> 00:01:35,000\nNext, the quotient rule: low d high minus high d low, over low squared.\n"
+    },
+    {
+      "source": "kaltura",
+      "entry_id": "1_fake0002",
+      "title": "Lecture 9 - Rates of Change (SYNTHETIC FIXTURE)",
+      "recorded_at": "2026-10-14",
+      "duration_sec": 40.0,
+      "media_url": "https://canvaskaf.ucsd.edu/media/t/1_fake0002",
+      "captions_srt": "1\n00:00:00,000 --> 00:00:08,000\nVelocity is the derivative of position with respect to time.\n\n2\n00:00:08,000 --> 00:00:16,000\nAcceleration is the derivative of velocity, so the second derivative of position.\n\n3\n00:00:16,000 --> 00:00:40,000\nIf position is t cubed, velocity is three t squared and acceleration is six t.\n"
+    }
+  ],
+  "files": [
+    {
+      "canvas_file_id": 1001,
+      "name": "Lecture 8 (3.3, Product and Quotient Rules).pdf",
+      "content_type": "application/pdf"
+    }
+  ]
+}

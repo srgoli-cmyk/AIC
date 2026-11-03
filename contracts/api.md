@@ -1,0 +1,46 @@
+# API contract (v1)
+
+This file is the single source of truth between the extension and the backend.
+Only the captain changes it, and only after the human approves the change.
+Any change here must update `sync_payload.schema.json`, the fixtures and both sides' tests in the same PR.
+
+Base URL in development: `http://localhost:8000`
+
+## GET /health
+Response `200`: `{"status": "ok"}`
+
+## POST /sync
+Body: `SyncPayload`, see `sync_payload.schema.json`. Example: `fixtures/sync_sample.json`.
+
+Rules:
+- Unknown fields are rejected with `422`. This is deliberate: it guarantees that tokens or cookies can never be stored by accident.
+- Re-syncing the same course is idempotent: lectures are upserted by `entry_id`.
+
+Response `200`:
+```json
+{"course_id": "canvas-78600", "lectures_received": 2, "files_received": 1, "status": "accepted"}
+```
+`status` is `"accepted"` until ingestion is implemented (step 3), then `"indexed"`.
+
+## GET /courses
+Response `200`:
+```json
+[{"course_id": "canvas-78600", "code": "MATH 20A", "name": "Calculus for Science and Engineering", "lectures": 22, "indexed": true}]
+```
+
+## POST /ask
+Body:
+```json
+{"course_id": "canvas-78600", "question": "How do we differentiate a product?", "top_k": 8}
+```
+`top_k` is optional, 1 to 20, default 8.
+
+Response `200`: see `fixtures/ask_response_sample.json`.
+- `sources[].start_sec` / `end_sec` are seconds from the start of the lecture.
+- `sources[].timestamp` is `mm:ss` (or `h:mm:ss`) of `start_sec`.
+- `sources[].url` opens the lecture page; time-jump support is still to be verified (see roadmap).
+
+Until step 4 lands, `/ask` returns `501`.
+
+## Errors
+All errors use FastAPI's default shape: `{"detail": ...}`.

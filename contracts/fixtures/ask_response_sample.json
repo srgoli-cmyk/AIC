@@ -1,0 +1,14 @@
+{
+  "answer": "Use the product rule: (fg)' = f'g + fg'. It is not f'g' [Lecture 8, 0:04]. Example: d/dx(x^2 sin x) = 2x sin x + x^2 cos x [Lecture 8, 0:19].",
+  "sources": [
+    {
+      "lecture_title": "Lecture 8 - Product and Quotient Rules (SYNTHETIC FIXTURE)",
+      "entry_id": "1_fake0001",
+      "start_sec": 4.5,
+      "end_sec": 19.0,
+      "timestamp": "0:04",
+      "url": "https://canvaskaf.ucsd.edu/media/t/1_fake0001",
+      "snippet": "A common mistake is to say the derivative of f times g is f prime times g prime. That is wrong."
+    }
+  ]
+}
