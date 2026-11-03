@@ -6,31 +6,32 @@ answer that links to the right lecture and minute.
 Steps are done in this order on purpose: the extension comes last, so a working search exists
 even if the extension slips (sync can be demoed with the console snippet).
 
-- [x] **0. Scaffold** (captain). Contract, agents, gates, stubs.
+- [x] **0. Scaffold** (maintainer). Contract, gates, stubs.
   Done when: `make check` passes; extension loads and "Check backend" returns ok.
 
-- [ ] **1. Sync prototype as a console snippet** (captain, `scripts/console_sync.js`).
+- [x] **1. Sync prototype as a console snippet** (maintainer, `scripts/console_sync.js`).
   Paste into DevTools on a canvaskaf.ucsd.edu lecture page; it collects entry IDs and SRTs for
-  the course and builds the payload (same mapping as `extension/src/payload.js`).
-  Done when: running it on MATH 20A prints a payload that passes `scripts/validate_payload.py`.
+  the course and downloads the payload (same mapping as `extension/src/payload.js`).
+  Done when: running it on MATH 20A downloads a payload that passes `scripts/validate_payload.py`.
 
-- [ ] **2. Store syncs in Postgres** (backend-dev). `/sync` upserts course, lectures, files;
+- [ ] **2. Store syncs in Postgres** (backend). `/sync` upserts course, lectures, files;
   `/courses` reads from DB. Idempotent by `entry_id`.
-  Done when: integration test syncs the fixture twice and gets one course with 2 lectures.
+  Done when: integration test syncs the fixture twice and gets one course with 2 lectures; a
+  re-sync with `files: []` keeps stored files; a non-empty list upserts by `canvas_file_id`.
 
-- [ ] **3. Ingestion** (backend-dev). SRT parser, chunking into ~45-60 s windows with
+- [ ] **3. Ingestion** (backend). SRT parser, chunking into ~45-60 s windows with
   start/end seconds, embeddings into `chunks`. Runs after `/sync`; status becomes `indexed`.
   Done when: unit tests for parser and chunker; fixture produces chunks with correct timestamps.
 
-- [ ] **4. /ask** (backend-dev). Embed question, top-k by cosine, prompt OpenRouter to answer
+- [ ] **4. /ask** (backend). Embed question, top-k by cosine, prompt OpenRouter to answer
   only from the chunks with `[Lecture, m:ss]` citations, return `sources[]`.
   Done when: test with a mocked LLM checks the prompt and the response shape; smoke test returns 200.
 
-- [ ] **5. Minimal UI** (captain or backend-dev). Streamlit page: pick course, ask, show answer
+- [ ] **5. Minimal UI** (maintainer or backend). Streamlit page: pick course, ask, show answer
   and clickable sources. Design does not matter.
 
-- [ ] **6. Extension sync** (extension-dev). Popup "Sync" does steps 2-4 from
-  `extension/CLAUDE.md` and POSTs the payload.
+- [ ] **6. Extension sync** (extension). Popup "Sync" follows `docs/sync_flow.md`
+  and POSTs the payload.
   Done when: syncing MATH 20A from the popup makes it appear in `/courses` with all lectures.
 
 Open questions

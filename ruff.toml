@@ -1,4 +1,4 @@
-# Lint settings for root-level Python (scripts/, .claude/hooks/). backend/ has its own config.
+# Lint settings for root-level Python (scripts/). backend/ has its own config.
 line-length = 100
 extend-exclude = ["backend"]
 

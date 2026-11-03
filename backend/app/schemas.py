@@ -1,6 +1,6 @@
 """Pydantic models mirroring contracts/sync_payload.schema.json and contracts/api.md.
 
-If you change anything here, the contract must change first (captain + human approval).
+If you change anything here, the contract must change first (maintainer + human approval).
 extra="forbid" is a security control: unknown fields such as tokens are rejected with 422.
 """
 

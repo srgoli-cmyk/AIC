@@ -3,6 +3,7 @@
 
 # real course content must never be committed (copyright + privacy)
 data/
+sync_[0-9]*.json
 *.srt
 *.vtt
 contracts/fixtures/real_*
@@ -17,10 +18,3 @@ __pycache__/
 # node / misc
 node_modules/
 .DS_Store
-.claude/settings.local.json
-
-# agents
-.claude/
-CLAUDE.md
-backend/CLAUDE.md
-extension/CLAUDE.md

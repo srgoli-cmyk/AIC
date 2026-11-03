@@ -39,6 +39,25 @@ def test_sync_accepts_fixture():
     assert any(c["course_id"] == "canvas-78600" for c in client.get("/courses").json())
 
 
+def test_sync_accepts_empty_files_twice():
+    """The console snippet always sends `files: []`; it must be valid, also on a re-sync."""
+    payload = copy.deepcopy(SAMPLE)
+    payload["files"] = []
+    jsonschema.validate(payload, SCHEMA, format_checker=jsonschema.FormatChecker())
+    for _ in range(2):
+        r = client.post("/sync", json=payload)
+        assert r.status_code == 200, r.text
+        assert r.json()["files_received"] == 0
+    # NOTE: "stored files are left alone" is not tested here; /sync stores nothing until step 2.
+
+
+def test_api_md_documents_empty_files_rule():
+    """Guard: the `files: []` re-sync rule must not be dropped from the contract unnoticed."""
+    text = " ".join((ROOT / "contracts/api.md").read_text().split())
+    assert "`files: []` on a re-sync leaves stored files alone and never deletes them" in text
+    assert "Only a non-empty `files` list upserts, by `canvas_file_id`" in text
+
+
 @pytest.mark.parametrize(
     "path",
     [

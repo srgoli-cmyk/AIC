@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test against a RUNNING backend (make dev). Owned by the captain.
+# End-to-end smoke test against a RUNNING backend (make dev). Owned by the maintainer.
 # Grows with the roadmap: step 4 adds a real /ask check.
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -1,5 +1,5 @@
 -- Runs once when the Postgres container is first created.
--- Owned by backend-dev; schema changes after step 2 go through migrations or a fresh `make db-reset`.
+-- Owned by the backend; schema changes after step 2 go through migrations or a fresh `make db-reset`.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS courses (
