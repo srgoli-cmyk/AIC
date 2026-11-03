@@ -80,7 +80,22 @@ BASE = "https://canvaskaf.ucsd.edu/media/t/1_a"
 
 def test_source_url_with_and_without_a_category():
     assert answer.source_url(f"{BASE}/111111", 60.0) == f"{BASE}/111111?st=57"
-    assert answer.source_url(BASE, 60.0) == f"{BASE}?st=57"
+    assert answer.source_url(BASE, 60.0) == f"{BASE}?st=57"  # a bare row stored earlier
+
+
+def test_source_url_keeps_other_query_parameters():
+    url = f"{BASE}/111111?a=1&b=x%20y"
+    assert answer.source_url(url, 60.0) == f"{BASE}/111111?a=1&b=x+y&st=57"
+
+
+def test_source_url_replaces_an_existing_st():
+    out = answer.source_url(f"{BASE}/111111?st=999&a=1", 60.0)
+    assert out == f"{BASE}/111111?a=1&st=57"
+    assert out.count("st=") == 1
+
+
+def test_source_url_keeps_a_fragment():
+    assert answer.source_url(f"{BASE}/111111#top", 60.0) == f"{BASE}/111111?st=57#top"
 
 
 @pytest.mark.parametrize("start, st", [(4.5, 1), (127.9, 124), (3.0, 0)])

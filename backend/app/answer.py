@@ -10,6 +10,7 @@ import math
 import re
 import secrets
 import time
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -304,8 +305,14 @@ def _snippet(text: str) -> str:
 
 
 def source_url(media_url: str, start_sec: float) -> str:
-    """The lecture page, opened 3 s before the passage starts (never before 0)."""
-    return f"{media_url}?st={max(0, math.floor(start_sec) - 3)}"
+    """The lecture page, opened 3 s before the passage starts (never before 0).
+
+    Rows stored before media_url was validated may already have a query (or a fragment): other
+    parameters are kept, an existing `st` is replaced, and the rest of the URL is unchanged."""
+    parts = urlsplit(media_url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "st"]
+    query.append(("st", str(max(0, math.floor(start_sec) - 3))))
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def _source(hit: db.ChunkHit) -> Source:

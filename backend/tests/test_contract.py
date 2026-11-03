@@ -99,10 +99,58 @@ def test_sync_rejects_unknown_fields(path):
         jsonschema.validate(payload, SCHEMA)
 
 
-def test_sync_rejects_foreign_media_url():
+MEDIA_URL_MESSAGE = (
+    "media_url must be https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId>, "
+    "with no query or fragment"
+)
+GOOD = "https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111"
+
+
+def test_pydantic_media_url_pattern_matches_the_json_schema():
+    from app.schemas import MEDIA_URL_PATTERN
+
+    schema_pattern = SCHEMA["properties"]["lectures"]["items"]["properties"]["media_url"]["pattern"]
+    assert MEDIA_URL_PATTERN == schema_pattern
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "https://canvaskaf.ucsd.edu/media/t/1_fake0001",  # no category
+        f"{GOOD}?st=5",  # query
+        f"{GOOD}#t=5",  # fragment
+        f"{GOOD}/",  # trailing slash
+        f"{GOOD}\n",  # trailing newline
+        "https://canvaskaf.ucsd.edu/media/t/1_fake0001/abc",  # non-numeric category
+        "https://canvaskaf.ucsd.edu/media/t/1_FAKE0001/111111",  # malformed entry id
+        "https://canvaskaf.ucsd.edu/media/t/fake0001/111111",  # malformed entry id
+        "https://canvaskaf.ucsd.edu/media/other",
+        "https://evil.example.com/media/t/1_fake0001/111111",  # another host
+        "http://canvaskaf.ucsd.edu/media/t/1_fake0001/111111",  # not https
+    ],
+)
+def test_sync_rejects_a_bad_media_url_and_stores_nothing(bad, monkeypatch):
+    def must_not_save(_payload):
+        raise AssertionError("a rejected sync must not reach the database")
+
+    monkeypatch.setattr("app.main.db.save_sync", must_not_save)
     payload = copy.deepcopy(SAMPLE)
-    payload["lectures"][0]["media_url"] = "https://evil.example.com/media/x"
-    assert client.post("/sync", json=payload).status_code == 422
+    payload["lectures"][0]["media_url"] = bad
+    r = client.post("/sync", json=payload)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert [d["loc"] for d in detail] == [["body", "lectures", 0, "media_url"]]
+    assert detail[0]["msg"] == f"Value error, {MEDIA_URL_MESSAGE}"
+    # The body holds no caption text and does not echo the rejected value.
+    assert payload["lectures"][0]["captions_srt"] not in r.text
+    assert set(detail[0]) == {"type", "loc", "msg"}
+
+
+@pytest.mark.integration
+def test_sync_accepts_a_valid_media_url():
+    payload = copy.deepcopy(SAMPLE)
+    payload["lectures"][0]["media_url"] = GOOD
+    assert client.post("/sync", json=payload).status_code == 200
 
 
 def test_ask_response_fixture_matches_model():
