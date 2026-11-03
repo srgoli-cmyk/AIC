@@ -8,7 +8,7 @@ const payload = buildSyncPayload({ ...raw, now: new Date("2026-11-02T18:00:00Z")
 
 test("maps course fields", () => {
   assert.deepEqual(payload.course, {
-    canvas_course_id: 78600,
+    canvas_course_id: 999999,
     code: "MATH 20A",
     name: "Calculus for Science and Engineering",
     term: "FA26",

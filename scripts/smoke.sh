@@ -18,7 +18,7 @@ curl -fsS "$BASE/courses"; echo
 echo "== ask (501 expected until step 4)"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/ask" \
   -H 'Content-Type: application/json' \
-  -d '{"course_id":"canvas-78600","question":"How do we differentiate a product?"}')
+  -d '{"course_id":"canvas-999999","question":"How do we differentiate a product?"}')
 echo "status $code"
 [[ "$code" == "501" || "$code" == "200" ]]
 

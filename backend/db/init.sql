@@ -1,5 +1,5 @@
--- Runs once when the Postgres container is first created.
--- Owned by the backend; schema changes after step 2 go through migrations or a fresh `make db-reset`.
+-- Runs once when the Postgres container is first created, and is also applied by the backend at
+-- startup and on first database use (app/db.py), so every statement must stay idempotent.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS courses (
@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS lectures (
     media_url     TEXT NOT NULL,
     captions_srt  TEXT NOT NULL,
     summary       TEXT
+);
+
+-- Course files (metadata only). A sync never deletes rows here.
+CREATE TABLE IF NOT EXISTS files (
+    canvas_file_id BIGINT PRIMARY KEY,
+    course_id      TEXT NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    content_type   TEXT
 );
 
 -- 384 = BAAI/bge-small-en-v1.5. Change together with EMBEDDING_DIM.
