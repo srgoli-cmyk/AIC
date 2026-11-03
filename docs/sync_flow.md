@@ -1,6 +1,36 @@
 # How sync works
 
-Verified manually on MATH 20A in the browser console on Oct 30, corrected by live runs on Nov 2-3.
+The extension does the sync from its popup. `scripts/console_sync.js` is the older manual route: it
+runs in the browser console on a lecture page and uses the same requests. The numbered steps are what
+was verified by hand on MATH 20A on Oct 30 and corrected by live runs on Nov 2-3; those runs used the
+console snippet. The extension's flow passes tests with mocks and has **not been run live yet**.
+
+## The extension's flow
+
+1. **Find the course.** The popup reads the course ID from the active `canvas.ucsd.edu/courses/<id>`
+   tab, using the `tabs` permission. Sync runs in the background worker (`src/sync.js`).
+2. **Check the backend.** `/openapi.json` must report the title "AI Lecture Search" before any course
+   data leaves the browser, because another app can hold the backend's port and answer `/health`.
+3. **Read Canvas.** The worker reads the course and its files over the REST API with the student's
+   cookies (step 1 below).
+4. **LTI launch.** `GET /api/v1/courses/:id/tabs` finds the tab labelled "Media Gallery"
+   (case-insensitive, no hardcoded tool ID). Its `full_url` opens in a background tab, which sets the
+   `canvaskaf.ucsd.edu` session. The tab is always closed afterwards.
+5. **Find the gallery.** Scripts injected into the canvaskaf frame (`chrome.scripting.executeScript`,
+   all frames) poll up to 30 s for `/channel/<x>/<digits>` in the location, or the most frequent
+   category in `/media/t/<entryId>/<digits>` links. On timeout, the popup asks the student to open the
+   Media Gallery tab once.
+6. **List lectures.** The frame fetches the paginated gallery and collects the entry IDs (step 2 below).
+7. **Skip what is stored.** `GET /courses/{course_id}/lectures` says which entries already have
+   captions, so a re-sync only fetches the others. A course the backend hasn't seen returns `404`,
+   which means every entry is new.
+8. **Per-entry KS and captions.** One injected call per entry, one at a time: fetch the lecture page,
+   try its KS candidates, read the SRT and title (step 4 below). The KS is used only inside that call.
+9. **`POST /sync`.** `src/payload.js` builds the body from an allowlist. It is checked for KS-shaped
+   strings before it is sent, and the popup shows counts.
+
+## What was verified by hand
+
 Unless marked untested, each step below has been seen working.
 
 1. **Canvas REST API** works from a page on canvas.ucsd.edu with the student's session cookies:
@@ -49,16 +79,3 @@ Unless marked untested, each step below has been seen working.
    response, log only the Kaltura error code (or "empty"), never the body. The extension checks each
    entry's result against the sessions seen on its page, also refuses to POST a KS-shaped string, and
    keeps only counts, the course ID, timestamps, status codes and fixed notes in storage.
-
-## Finding the gallery from the extension
-Not yet proven live.
-- `GET /api/v1/courses/:id/tabs`, match the tab labelled "Media Gallery" (case-insensitive, no
-  hardcoded tool ID), open its `full_url` in a background tab to trigger the LTI launch, and always
-  close that tab afterwards.
-- In the canvaskaf frame, poll up to 30 s for `/channel/<x>/<digits>` in the location, or the most
-  frequent category in `/media/t/<entryId>/<digits>` links. On timeout, ask the user to open the Media
-  Gallery tab once.
-- `GET /courses/{course_id}/lectures` tells which entries are already stored with captions; only the
-  others are fetched.
-- Before any course data leaves the browser, `/openapi.json` must report the title
-  "AI Lecture Search", because another app can hold the backend's port and answer `/health`.
