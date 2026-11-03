@@ -41,3 +41,13 @@ def embed(texts: list[str]) -> list[list[float]]:
             texts, batch_size=32, normalize_embeddings=True, show_progress_bar=False
         )
     return [[float(x) for x in v] for v in vectors]
+
+
+# bge models are trained to retrieve passages for a question written with this prefix. Passages
+# themselves are embedded without it (see embed).
+QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+def embed_query(question: str) -> list[float]:
+    """Embed a search question with the model's query instruction. Shares the one loaded model."""
+    return embed([QUERY_PREFIX + question])[0]

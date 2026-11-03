@@ -245,10 +245,10 @@ def test_ask_unknown_course_is_404():
 
 
 @pytest.mark.integration
-def test_ask_known_course_is_501():
+def test_ask_known_course_without_a_key_is_503():
     _sync(SAMPLE)
     r = client.post("/ask", json={"course_id": CID, "question": "anything?"})
-    assert r.status_code == 501
+    assert r.status_code == 503
 
 
 @pytest.mark.integration

@@ -9,6 +9,7 @@ Never log SQLAlchemy exceptions: their text can include bound parameters (captio
 import hashlib
 import logging
 import threading
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
@@ -447,3 +448,90 @@ def refresh_indexed(course_id: str) -> None:
             .where(Course.course_id == course_id)
             .values(indexed=and_(has_lectures, ~_has_due_lecture()))
         )
+
+
+# --- search ---
+
+
+@dataclass(frozen=True)
+class ChunkHit:
+    entry_id: str
+    lecture_title: str
+    lecture_no: int | None
+    media_url: str
+    start_sec: float
+    end_sec: float
+    text: str
+    distance: float  # cosine distance to the question; smaller is closer
+
+
+def _version_at_least(version: str, major: int, minor: int) -> bool:
+    try:
+        parts = tuple(int(p) for p in version.split(".")[:2])
+    except ValueError:
+        return False
+    return parts >= (major, minor)
+
+
+_warned_old_pgvector = False
+
+
+def _search_statement(course_id: str, query_vector: list[float], limit: int):
+    distance = Chunk.embedding.cosine_distance(query_vector).label("distance")
+    return (
+        select(
+            Chunk.entry_id,
+            Lecture.title,
+            Lecture.lecture_no,
+            Lecture.media_url,
+            Chunk.start_sec,
+            Chunk.end_sec,
+            Chunk.text,
+            distance,
+        )
+        .join(Lecture, Lecture.entry_id == Chunk.entry_id)
+        .where(Lecture.course_id == course_id, Chunk.embedding.is_not(None))
+        .order_by(distance)
+        .limit(limit)
+    )
+
+
+def _to_hits(rows) -> list[ChunkHit]:
+    # An index scan with iterative scanning can return rows slightly out of order, so sort.
+    return sorted((ChunkHit(*r) for r in rows), key=lambda h: h.distance)
+
+
+def search_chunks(course_id: str, query_vector: list[float], limit: int) -> list[ChunkHit]:
+    """The `limit` chunks of one course closest to the vector (cosine), closest first."""
+    global _warned_old_pgvector
+    ensure_schema()
+    stmt = _search_statement(course_id, query_vector, limit)
+    with Session(engine) as session, session.begin():
+        # Settings last for this transaction only. The index scan reads ef_search candidates and
+        # the course filter is applied afterwards, so a small ef_search under-returns.
+        ef = min(max(limit, 40), 1000)
+        session.execute(text("SELECT set_config('hnsw.ef_search', :v, true)"), {"v": str(ef)})
+        version = session.execute(
+            text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+        ).scalar()
+        if version and _version_at_least(version, 0, 8):
+            # Keep scanning the index until `limit` rows pass the course filter (pgvector 0.8+).
+            session.execute(text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
+        elif not _warned_old_pgvector:
+            _warned_old_pgvector = True
+            log.warning(
+                "pgvector %s has no iterative index scan; searches may under-return", version
+            )
+        rows = session.execute(stmt).all()
+        if len(rows) < limit:
+            # Either the course has fewer chunks than asked for (the exact scan is cheap), or the
+            # index gave up early (hnsw.max_scan_tuples) in a database with many courses. Scan
+            # exactly, so "no rows" really means no embedded chunks.
+            session.execute(text("SELECT set_config('enable_indexscan', 'off', true)"))
+            exact = session.execute(stmt).all()
+            if len(exact) > len(rows):
+                log.info(
+                    "vector index returned %d of %d rows; used an exact scan", len(rows), limit
+                )
+            rows = exact
+    return _to_hits(rows)

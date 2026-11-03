@@ -2,6 +2,7 @@
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
+PORT ?= 8000
 
 setup:
 	python3 -m venv $(VENV)
@@ -18,10 +19,10 @@ db-reset:
 	docker compose up -d db
 
 dev:
-	cd backend && ../$(VENV)/bin/uvicorn app.main:app --reload --port 8000
+	cd backend && ../$(VENV)/bin/uvicorn app.main:app --reload --port $(PORT)
 
 check:
 	PATH="$(abspath $(VENV))/bin:$$PATH" bash scripts/check_all.sh
 
 smoke:
-	bash scripts/smoke.sh
+	BASE_URL="$${BASE_URL:-http://localhost:$(PORT)}" bash scripts/smoke.sh

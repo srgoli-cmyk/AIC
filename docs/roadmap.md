@@ -25,7 +25,7 @@ even if the extension slips (sync can be demoed with the console snippet).
   Done when: unit tests for parser and chunker; fixture produces chunks with correct timestamps;
   syncing the fixture via `make dev` ends with `indexed: true`.
 
-- [ ] **4. /ask** (backend). Embed question, top-k by cosine, prompt OpenRouter to answer
+- [x] **4. /ask** (backend). Embed question, top-k by cosine, prompt OpenRouter to answer
   only from the chunks with `[Lecture, m:ss]` citations, return `sources[]`.
   Done when: test with a mocked LLM checks the prompt and the response shape; smoke test returns 200.
 

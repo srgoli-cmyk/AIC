@@ -42,9 +42,14 @@ Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources[].timestamp` is `mm:ss` (or `h:mm:ss`) of `start_sec`.
 - `sources[].url` opens the lecture page; time-jump support is still to be verified (see roadmap).
 
-Until step 4 lands, `/ask` returns `501`.
+- `answer` answers only from the course's captions and cites them as `[Lecture N, m:ss]`, or says the captions don't contain the answer. A lecture with no number is cited by its title.
+- `sources` lists the passages the answer cites, most relevant first. It is empty when the answer cites nothing. Citations that match no passage are removed from `answer`.
+- `404`: the course is not synced. A synced course with nothing indexed yet returns `200` with an answer saying so and empty `sources`, once a key is configured.
 
 ## Errors
 All errors use FastAPI's default shape: `{"detail": ...}`.
 - `503 {"detail": "database unavailable"}`: the database cannot be reached.
+- `503 {"detail": "answer service not configured"}`: no API key is set for `/ask`.
+- `503 {"detail": "search service unavailable"}`: the embedding model could not be loaded for `/ask`.
+- `502 {"detail": "answer service unavailable"}`: the answer service failed or timed out.
 - `422 {"detail": "a value was rejected by the database"}`: a contract-valid value cannot be stored. Nothing from that sync is saved.

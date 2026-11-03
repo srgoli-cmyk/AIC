@@ -1,5 +1,6 @@
 """FastAPI app. Sync and courses are stored in Postgres (app/db.py); after a sync, captions are
-chunked and embedded in the background (app/ingest.py). /ask comes in step 4."""
+chunked and embedded in the background (app/ingest.py); /ask answers from the stored chunks
+(app/answer.py)."""
 
 import logging
 from collections.abc import AsyncIterator
@@ -11,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import db, ingest
+from . import answer, db, ingest
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -115,8 +116,23 @@ def courses() -> list[CourseSummary]:
     return db.list_courses()
 
 
+@app.exception_handler(answer.AnswerNotConfigured)
+def answer_not_configured(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "answer service not configured"})
+
+
+@app.exception_handler(answer.AnswerUnavailable)
+def answer_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": "answer service unavailable"})
+
+
+@app.exception_handler(answer.SearchUnavailable)
+def search_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "search service unavailable"})
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest) -> AskResponse:
     if not db.course_exists(req.course_id):
         raise HTTPException(status_code=404, detail="course not synced")
-    raise HTTPException(status_code=501, detail="/ask is implemented in step 4")
+    return answer.answer_question(req.course_id, req.question, req.top_k)

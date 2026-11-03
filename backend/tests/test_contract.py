@@ -94,7 +94,9 @@ def test_ask_response_fixture_matches_model():
 
 
 @pytest.mark.integration
-def test_ask_is_stubbed_until_step_4():
+def test_ask_without_an_api_key_is_a_503():
+    """Tests run with no API key; a synced course answers 503 until one is configured."""
     client.post("/sync", json=SAMPLE)
     r = client.post("/ask", json={"course_id": "canvas-999999", "question": "product rule?"})
-    assert r.status_code == 501
+    assert r.status_code == 503
+    assert r.json() == {"detail": "answer service not configured"}
