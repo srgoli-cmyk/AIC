@@ -65,19 +65,3 @@ A whole course takes a while, because lectures are read one at a time. Syncing a
 | `make web` | Serves only the page at http://localhost:5173, for working on it (add `?demo` for demo data) |
 | `make check` | Runs all linters and tests (needs `make db`) |
 | `make smoke` | Tests a running backend end to end; makes one real OpenRouter call with your key |
-
-## Troubleshooting
-
-- **Port 8000 is already in use.** The extension only talks to port 8000. See what holds it and stop
-  that app:
-  ```bash
-  lsof -nP -iTCP:8000 -sTCP:LISTEN
-  ```
-- **Docker is not running.** An error like `Cannot connect to the Docker daemon` means Docker Desktop
-  isn't started. Start it, wait until it's running, and try again.
-- **`make check` fails with "Postgres is not reachable".** It needs the database: run `make db` first.
-
-## Contributing
-
-- Never commit `.env`, anything under `data/`, or real captions. Test data is synthetic.
-- Work from a fresh `main` (`git checkout main && git pull`), and run `make check` before you push.
