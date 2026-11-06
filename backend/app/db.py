@@ -10,7 +10,7 @@ import hashlib
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from pgvector.sqlalchemy import Vector
@@ -34,7 +34,7 @@ from sqlalchemy import (
     text,
     update,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import DataError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -43,7 +43,14 @@ from sqlalchemy.pool import NullPool
 from . import chunking
 from .chunking import Chunk as ChunkData
 from .config import settings
-from .schemas import CourseSummary, LectureStatus, SyncPayload, course_id_for
+from .schemas import (
+    CourseDetail,
+    CourseSummary,
+    LectureInfo,
+    LectureStatus,
+    SyncPayload,
+    course_id_for,
+)
 from .titles import parse_title
 
 log = logging.getLogger("aic")
@@ -105,6 +112,10 @@ class Course(Base):
     code: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     term: Mapped[str | None] = mapped_column(Text)
+    term_start: Mapped[date | None] = mapped_column(Date)
+    term_end: Mapped[date | None] = mapped_column(Date)
+    instructors: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    sections: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     indexed: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
@@ -115,6 +126,7 @@ class Lecture(Base):
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(Text)
     recorded_at: Mapped[date | None] = mapped_column(Date)
+    recorded_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_sec: Mapped[float] = mapped_column(Float)
     media_url: Mapped[str] = mapped_column(Text)
     captions_srt: Mapped[str] = mapped_column(Text)
@@ -232,6 +244,10 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                 code=payload.course.code,
                 name=payload.course.name,
                 term=payload.course.term,
+                term_start=payload.course.term_start,
+                term_end=payload.course.term_end,
+                instructors=payload.course.instructors,
+                sections=payload.course.sections,
                 synced_at=payload.synced_at,
             )
             session.execute(
@@ -241,6 +257,12 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                         "code": course.excluded.code,
                         "name": course.excluded.name,
                         "term": func.coalesce(course.excluded.term, Course.term),
+                        "term_start": func.coalesce(course.excluded.term_start, Course.term_start),
+                        "term_end": func.coalesce(course.excluded.term_end, Course.term_end),
+                        "instructors": func.coalesce(
+                            course.excluded.instructors, Course.instructors
+                        ),
+                        "sections": func.coalesce(course.excluded.sections, Course.sections),
                         "synced_at": course.excluded.synced_at,
                     },
                 )
@@ -259,6 +281,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                         "lecture_no": titles[lec.entry_id][0],
                         "section": titles[lec.entry_id][1],
                         "recorded_at": lec.recorded_at,
+                        "recorded_start": lec.recorded_start,
                         "duration_sec": lec.duration_sec,
                         "media_url": lec.media_url,
                         "captions_srt": lec.captions_srt,
@@ -278,6 +301,9 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                             "section": lecture.excluded.section,
                             "recorded_at": func.coalesce(
                                 lecture.excluded.recorded_at, Lecture.recorded_at
+                            ),
+                            "recorded_start": func.coalesce(
+                                lecture.excluded.recorded_start, Lecture.recorded_start
                             ),
                             "duration_sec": lecture.excluded.duration_sec,
                             "media_url": lecture.excluded.media_url,
@@ -378,6 +404,68 @@ def list_lecture_statuses(course_id: str) -> list[LectureStatus]:
     )
     with Session(engine) as session:
         return [LectureStatus(entry_id=r[0], has_captions=r[1]) for r in session.execute(stmt)]
+
+
+def get_course(course_id: str) -> CourseDetail | None:
+    """The course with its details and every stored lecture (no captions), or None. Lectures are
+    ordered by number, then recording date, then entry_id; `indexed` is per lecture: its chunks
+    were built from its current captions."""
+    if "\x00" in course_id:
+        return None
+    ensure_schema()
+    lecture_indexed = Lecture.chunked_hash.is_not_distinct_from(_current_hash()).label("indexed")
+    with Session(engine) as session:
+        course = session.get(Course, course_id)
+        if course is None:
+            return None
+        rows = session.execute(
+            select(
+                Lecture.entry_id,
+                Lecture.title,
+                Lecture.lecture_no,
+                Lecture.section,
+                Lecture.recorded_at,
+                Lecture.recorded_start,
+                Lecture.duration_sec,
+                Lecture.media_url,
+                lecture_indexed,
+            )
+            .where(Lecture.course_id == course_id)
+            .order_by(
+                Lecture.lecture_no.asc().nulls_last(),
+                Lecture.recorded_start.asc().nulls_last(),
+                Lecture.recorded_at.asc().nulls_last(),
+                Lecture.entry_id.collate("C"),
+            )
+        ).all()
+        return CourseDetail(
+            course_id=course.course_id,
+            canvas_course_id=course.canvas_course_id,
+            code=course.code,
+            name=course.name,
+            term=course.term,
+            term_start=course.term_start,
+            term_end=course.term_end,
+            instructors=course.instructors or [],
+            sections=course.sections or [],
+            synced_at=course.synced_at.astimezone(UTC),
+            indexed=course.indexed,
+            lectures=[
+                LectureInfo(
+                    entry_id=r[0],
+                    title=r[1],
+                    lecture_no=r[2],
+                    section=r[3],
+                    recorded_at=r[4],
+                    # Postgres returns the session's time zone; the contract promises UTC.
+                    recorded_start=r[5].astimezone(UTC) if r[5] else None,
+                    duration_sec=r[6],
+                    media_url=r[7],
+                    indexed=bool(r[8]),
+                )
+                for r in rows
+            ],
+        )
 
 
 def course_exists(course_id: str) -> bool:
@@ -490,7 +578,9 @@ def _version_at_least(version: str, major: int, minor: int) -> bool:
 _warned_old_pgvector = False
 
 
-def _search_statement(course_id: str, query_vector: list[float], limit: int):
+def _search_statement(
+    course_id: str, query_vector: list[float], limit: int, entry_id: str | None = None
+):
     distance = Chunk.embedding.cosine_distance(query_vector).label("distance")
     return (
         select(
@@ -504,7 +594,11 @@ def _search_statement(course_id: str, query_vector: list[float], limit: int):
             distance,
         )
         .join(Lecture, Lecture.entry_id == Chunk.entry_id)
-        .where(Lecture.course_id == course_id, Chunk.embedding.is_not(None))
+        .where(
+            Lecture.course_id == course_id,
+            Chunk.embedding.is_not(None),
+            *([Chunk.entry_id == entry_id] if entry_id else []),
+        )
         .order_by(distance)
         .limit(limit)
     )
@@ -515,11 +609,14 @@ def _to_hits(rows) -> list[ChunkHit]:
     return sorted((ChunkHit(*r) for r in rows), key=lambda h: h.distance)
 
 
-def search_chunks(course_id: str, query_vector: list[float], limit: int) -> list[ChunkHit]:
-    """The `limit` chunks of one course closest to the vector (cosine), closest first."""
+def search_chunks(
+    course_id: str, query_vector: list[float], limit: int, entry_id: str | None = None
+) -> list[ChunkHit]:
+    """The `limit` chunks of one course closest to the vector (cosine), closest first. With
+    `entry_id`, only that lecture's chunks."""
     global _warned_old_pgvector
     ensure_schema()
-    stmt = _search_statement(course_id, query_vector, limit)
+    stmt = _search_statement(course_id, query_vector, limit, entry_id)
     with Session(engine) as session, session.begin():
         # Settings last for this transaction only. The index scan reads ef_search candidates and
         # the course filter is applied afterwards, so a small ef_search under-returns.

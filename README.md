@@ -38,7 +38,7 @@ u also need Chrome and an [OpenRouter API key](https://openrouter.ai/keys).
    make start
    ```
 
-the search page is at http://localhost:8501.
+the search page is at http://localhost:8501. the new course page is at http://localhost:8000/app/ (served by the backend; the extension's popup links straight to a synced course there).
 
 ## Getting data
 

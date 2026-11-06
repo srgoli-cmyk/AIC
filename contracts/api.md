@@ -19,7 +19,7 @@ Rules:
 - Unknown fields are rejected with `422`. This is deliberate: it guarantees that tokens or cookies can never be stored by accident.
 - Re-syncing the same course is idempotent: lectures are upserted by `entry_id`.
 - `files: []` on a re-sync leaves stored files alone and never deletes them. Only a non-empty `files` list upserts, by `canvas_file_id`.
-- `media_url` must be `https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId>`, with no query or fragment; for example `https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111`. Without the category the page answers "Access denied", so anything else is rejected with `422`, and nothing from that sync is saved.
+- `media_url` must be `https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId>` or a podcast lecture page `https://podcast.ucsd.edu/watch/<term>/<section>/<n>`, with no query or fragment; for example `https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111` or `https://podcast.ucsd.edu/watch/fa26/dsc010_002-000-le/3`. A canvaskaf link without the category answers "Access denied". Anything else is rejected with `422`, and nothing from that sync is saved.
 - A lecture already stored under a different course is left untouched and counted in `lectures_skipped_other_course`.
 
 Response `200`:
@@ -41,6 +41,25 @@ Lets a client skip lectures that are already stored. Response `200`, ordered by 
 ```
 `has_captions` is `true` when the lecture has stored captions. Lectures with no captions are not stored, so an entry missing from this list has none yet. A synced course with no lectures returns `[]`. `404`: the course is not synced.
 
+## GET /courses/{course_id}
+The course page: details from Canvas plus every stored lecture, without captions.
+
+Response `200`:
+```json
+{"course_id": "canvas-999999", "canvas_course_id": 999999, "code": "MATH 20A", "name": "Calculus for Science and Engineering",
+ "term": "FA26", "term_start": "2026-09-24", "term_end": null, "instructors": ["Ada Lovelace"], "sections": ["A00", "B00"],
+ "synced_at": "2026-11-03T12:00:00Z", "indexed": true,
+ "lectures": [{"entry_id": "1_fake0001", "title": "Lecture 8 - Product Rule [A00]", "lecture_no": 8, "section": null,
+   "recorded_at": "2026-10-14", "recorded_start": "2026-10-14T17:00:12Z", "duration_sec": 2950.0,
+   "media_url": "https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111", "indexed": true}]}
+```
+- Lectures are ordered by `lecture_no`, then `recorded_start`, then `recorded_at`. Missing values sort last.
+- `section` is read from the first bracket in the title, digits only (e.g. `[002-000-LE]` gives `"002"`). `sections` are Canvas's section names; the two are not linked.
+- `recorded_start` is when Kaltura created the recording (UTC), close to when class started.
+- Lecture `indexed` is true when its chunks match its current captions.
+
+`404 {"detail": "course not synced"}` when the course is unknown.
+
 ## POST /ask
 Body:
 ```json
@@ -51,7 +70,7 @@ Body:
 Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources[].start_sec` / `end_sec` are seconds from the start of the lecture.
 - `sources[].timestamp` is `mm:ss` (or `h:mm:ss`) of `start_sec`.
-- `sources[].url` is the lecture's `media_url` plus `?st=<seconds>`, where seconds is `max(0, floor(start_sec) - 3)`, so playback starts a few seconds before the cited passage. For example `https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111?st=1`.
+- `sources[].url` is the lecture's `media_url` plus `?st=<seconds>` (`#<seconds>` for a podcast.ucsd.edu page), where seconds is `max(0, floor(start_sec) - 3)`, so playback starts a few seconds before the cited passage. For example `https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111?st=1`.
 
 - `answer` is Markdown with LaTeX (`$...$`, `$$...$$`) that explains the topic, using the course's captions as its main source. It may use general math knowledge to explain, but only what the captions say is cited, as `[Lecture N, m:ss]`. A lecture with no number is cited by its title. An `answer` can carry text from captions, so a client must not render links, images or HTML from it, other than citations it builds from `sources`.
 - `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.

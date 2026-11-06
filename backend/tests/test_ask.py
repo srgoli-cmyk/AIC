@@ -83,6 +83,13 @@ def test_source_url_with_and_without_a_category():
     assert answer.source_url(BASE, 60.0) == f"{BASE}?st=57"  # a bare row stored earlier
 
 
+def test_source_url_for_a_podcast_page_uses_the_fragment():
+    page = "https://podcast.ucsd.edu/watch/fa26/dsc010_002-000-le/3"
+    assert answer.source_url(page, 60.0) == f"{page}#57"
+    assert answer.source_url(page, 1.5) == f"{page}#0"
+    assert answer.source_url(f"{page}#999", 60.0) == f"{page}#57"
+
+
 def test_source_url_keeps_other_query_parameters():
     url = f"{BASE}/111111?a=1&b=x%20y"
     assert answer.source_url(url, 60.0) == f"{BASE}/111111?a=1&b=x+y&st=57"

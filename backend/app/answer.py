@@ -305,13 +305,18 @@ def _snippet(text: str) -> str:
 
 
 def source_url(media_url: str, start_sec: float) -> str:
-    """The lecture page, opened 3 s before the passage starts (never before 0).
+    """The lecture page, opened 3 s before the passage starts (never before 0): `?st=<s>` on
+    canvaskaf, `#<s>` on podcast.ucsd.edu.
 
     Rows stored before media_url was validated may already have a query (or a fragment): other
     parameters are kept, an existing `st` is replaced, and the rest of the URL is unchanged."""
     parts = urlsplit(media_url)
+    start = max(0, math.floor(start_sec) - 3)
+    # The podcast player reads the start time, in seconds, from the fragment.
+    if parts.hostname == "podcast.ucsd.edu":
+        return urlunsplit(parts._replace(fragment=str(start)))
     query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "st"]
-    query.append(("st", str(max(0, math.floor(start_sec) - 3))))
+    query.append(("st", str(start)))
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
@@ -330,7 +335,9 @@ def _source(hit: db.ChunkHit) -> Source:
 # --- entry point ---
 
 
-def answer_question(course_id: str, question: str, top_k: int) -> AskResponse:
+def answer_question(
+    course_id: str, question: str, top_k: int, entry_id: str | None = None
+) -> AskResponse:
     """Raises AnswerNotConfigured, SearchUnavailable or AnswerUnavailable; main maps them."""
     if not settings.openrouter_api_key:
         raise AnswerNotConfigured
@@ -340,7 +347,11 @@ def answer_question(course_id: str, question: str, top_k: int) -> AskResponse:
         log.error("search unavailable: embedding model not loaded (%s)", exc.cause)
         raise SearchUnavailable from None
     # Over-fetch: de-duplication removes rows, and the closest rows are often neighbours.
-    hits = db.search_chunks(course_id, query_vector, max(top_k * 4, 40))
+    limit = max(top_k * 4, 40)
+    if entry_id is None:
+        hits = db.search_chunks(course_id, query_vector, limit)
+    else:
+        hits = db.search_chunks(course_id, query_vector, limit, entry_id=entry_id)
     if not hits:
         return AskResponse(answer=NOTHING_INDEXED, sources=[])
     given = dedupe(hits, top_k)

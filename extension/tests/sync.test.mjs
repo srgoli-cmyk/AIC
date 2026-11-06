@@ -32,7 +32,15 @@ test("full flow: new entries are read and sent; summary has counts", async () =>
   assert.match(summary.finishedAt, /^2026-11-03T12:/);
   const posted = s.opts.posted;
   assert.equal(posted.schema_version, "1");
-  assert.deepEqual(posted.course, { canvas_course_id: COURSE, code: "MATH 20A", name: "Calculus", term: "FA26" });
+  assert.deepEqual(posted.course, {
+    canvas_course_id: COURSE,
+    code: "MATH 20A",
+    name: "Calculus",
+    term: "FA26",
+    term_start: "2026-09-24",
+    instructors: ["Ada Lovelace"],
+    sections: ["MATH 20A - A00", "MATH 20A - B00"],
+  });
   assert.deepEqual(posted.lectures.map((l) => l.entry_id), [A, B, C]);
   assert.equal(posted.lectures[0].captions_srt, SRT);
   assert.equal(posted.lectures[0].title, `Lecture ${A}`);
@@ -105,6 +113,13 @@ test("course failure stops with a log-in message before anything else", async ()
   await assert.rejects(runSync(deps), /Log in to Canvas/i);
   assert.equal(tabs.state.created.length, 0);
   assert.ok(!s.requests.some((r) => r.method === "POST"));
+});
+
+test("sections 403: the sync continues without sections and adds no note", async () => {
+  const { s, deps } = setup({ server: { sectionsStatus: 403 } });
+  const summary = await runSync(deps);
+  assert.equal(s.opts.posted.course.sections, undefined);
+  assert.equal(summary.lectures, 3);
 });
 
 test("files 403: the sync continues with files [] and a note", async () => {

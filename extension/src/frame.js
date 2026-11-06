@@ -74,11 +74,15 @@ export async function collectEntryIds(categoryId, maxPages) {
 }
 
 /**
- * Reads one lecture's SRT. Returns { host, ok: true, srt, title, titleSource, duration?, createdAt?,
- * ksLength } or { host, ok: false, reason, failures? }. Every code is plain capitals, an HTTP
- * status or a call name.
+ * Reads one lecture's SRT. Returns { host, ok: true, entryId, srt, title, titleSource, duration?,
+ * createdAt?, ksLength } or { host, ok: false, reason, failures?, entryId? }. Every code is plain
+ * capitals, an HTTP status or a call name.
+ *
+ * On canvaskaf the page is /media/t/<entryId>/<categoryId>. On podcast.ucsd.edu, pagePath is the
+ * lecture page (/watch/<term>/<section>/<n>) and the entry id is read from it; an id in skipIds
+ * (already stored with captions) returns ALREADY_STORED before any Kaltura call.
  */
-export async function readEntryCaptions(entryId, categoryId, preferredLength, ksPrefix) {
+export async function readEntryCaptions(entryId, categoryId, preferredLength, ksPrefix, pagePath, skipIds) {
   const host = location.hostname;
   const API = "https://cdnapisec.kaltura.com/api_v3/service/";
   const MAX_CANDIDATES = 6; // once a session length is known
@@ -95,7 +99,12 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
     return result;
   }
 
-  if (!/^[0-9]_[a-z0-9]{8}$/.test(String(entryId)) || !/^\d{1,15}$/.test(String(categoryId))) {
+  const ENTRY = /^[0-9]_[a-z0-9]{8}$/;
+  const PODCAST_PAGE = /^\/watch\/[a-z]{2}[0-9]{2}\/[a-z0-9]{2,12}_[0-9]{3}-[0-9]{3}-[a-z]{2}\/[0-9]{1,3}$/;
+  const podcast = pagePath !== undefined && pagePath !== null;
+  if (podcast) {
+    if (typeof pagePath !== "string" || !PODCAST_PAGE.test(pagePath)) return { host, ok: false, reason: "BAD_INPUT" };
+  } else if (!ENTRY.test(String(entryId)) || !/^\d{1,15}$/.test(String(categoryId))) {
     return { host, ok: false, reason: "BAD_INPUT" };
   }
   if (typeof ksPrefix !== "string" || !/^[A-Za-z0-9]{1,8}$/.test(ksPrefix)) {
@@ -175,7 +184,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
   function isLecturePage(url) {
     try {
       const u = new URL(url);
-      return u.hostname === host && u.pathname.startsWith("/media/");
+      return u.hostname === host && u.pathname.startsWith(podcast ? "/watch/" : "/media/");
     } catch {
       return false;
     }
@@ -183,7 +192,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
 
   let html;
   try {
-    const r = await fetch(`/media/t/${entryId}/${categoryId}`, {
+    const r = await fetch(podcast ? pagePath : `/media/t/${entryId}/${categoryId}`, {
       credentials: "include",
       signal: AbortSignal.timeout(25000),
     });
@@ -193,6 +202,16 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
     html = await r.text();
   } catch {
     return { host, ok: false, reason: "PAGE_FAILED" };
+  }
+
+  // A podcast page names its entry in the player call; other ids on the page are not this lecture.
+  if (podcast) {
+    const named =
+      html.match(/loadMedia\(\s*\{\s*entryId\s*:\s*['"]([0-9]_[a-z0-9]{8})['"]/)?.[1] ||
+      html.match(/['"]entry_id['"]\s*:\s*['"]([0-9]_[a-z0-9]{8})['"]/)?.[1];
+    if (!named) return { host, ok: false, reason: "NO_ENTRY" };
+    entryId = named;
+    if (Array.isArray(skipIds) && skipIds.includes(entryId)) return { host, ok: false, reason: "ALREADY_STORED", entryId };
   }
 
   // Lecture pages hold several strings shaped like a session; only some work.
@@ -208,7 +227,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
   const others = found.filter((k) => !sameLength.includes(k));
   const known = typeof preferredLength === "number";
   const candidates = [...sameLength, ...others].slice(0, known ? MAX_CANDIDATES : MAX_COLD_CANDIDATES);
-  if (candidates.length === 0) return finish({ host, ok: false, reason: "NO_SESSION" });
+  if (candidates.length === 0) return finish({ host, ok: false, reason: "NO_SESSION", entryId });
 
   const failures = [];
   for (const ks of candidates) {
@@ -219,7 +238,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
     }
     // Title: the entry's own metadata. Some sessions are limited, so try the others on this
     // lecture before falling back to the lecture page's <title>.
-    const result = { host, ok: true, srt: got.srt, ksLength: ks.length };
+    const result = { host, ok: true, entryId, srt: got.srt, ksLength: ks.length };
     for (const other of [ks, ...candidates.filter((c) => c !== ks)]) {
       const meta = await kaltura(other, "baseentry/action/get", { format: "1", entryId });
       const data = meta.body ? parseJson(meta.body) : undefined;
@@ -232,7 +251,12 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
       }
     }
     const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
-    const decoded = title ? decodeEntities(title).replace(/\s+/g, " ").trim() : "";
+    let decoded = title ? decodeEntities(title).replace(/\s+/g, " ").trim() : "";
+    // Every podcast page of a section has the same <title>; the lecture label tells them apart.
+    if (podcast && decoded) {
+      const label = html.match(/Lecture \d{1,3},\s*\d{1,2}\/\d{1,2}\/\d{4}/)?.[0];
+      decoded = `${label || `Lecture ${pagePath.split("/").pop()}`} - ${decoded.replace(/\s*-\s*Course Podcasts.*$/, "")}`;
+    }
     // A title holding a long base64-like run could be a session: refuse it.
     if (!decoded || /[A-Za-z0-9+/=_-]{40,}/.test(decoded)) return finish({ host, ok: false, reason: "NO_TITLE" });
     result.title = decoded;
@@ -240,5 +264,5 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
     result.duration = 0;
     return finish(result);
   }
-  return finish({ host, ok: false, reason: "NO_CAPTIONS", failures });
+  return finish({ host, ok: false, reason: "NO_CAPTIONS", failures, entryId });
 }

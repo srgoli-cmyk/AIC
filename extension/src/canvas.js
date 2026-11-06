@@ -1,6 +1,6 @@
 // Canvas REST calls. They run in the background worker with the student's cookies; host_permissions
 // make them same-privilege requests, so CORS does not apply. Pure functions: fetch is injected.
-import { CANVAS_HOST, CANVAS_ORIGIN, FETCH_TIMEOUT_MS, MAX_CANVAS_PAGES, MAX_FILES } from "./config.js";
+import { CANVAS_HOST, CANVAS_ORIGIN, FETCH_TIMEOUT_MS, MAX_CANVAS_PAGES, MAX_FILES, MAX_INSTRUCTORS, MAX_SECTIONS } from "./config.js";
 import { SyncError } from "./errors.js";
 import { clipText, timeoutSignal } from "./util.js";
 
@@ -67,13 +67,37 @@ export async function getList(fetchFn, url) {
 
 const clip = clipText;
 
-/** Allowlisted course fields: { id, course_code, name, term?: { name } }. */
+function isoDay(value) {
+  if (typeof value !== "string") return undefined;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : undefined;
+}
+
+/**
+ * Allowlisted course fields: { id, course_code, name, term?: { name, start?, end? }, instructors }.
+ * Instructors are the course's teachers by display name only (no ids, emails or avatars).
+ */
 export async function fetchCourse(fetchFn, courseId) {
-  const { data } = await getPage(fetchFn, `${CANVAS_ORIGIN}/api/v1/courses/${courseId}?include[]=term`);
+  const { data } = await getPage(fetchFn, `${CANVAS_ORIGIN}/api/v1/courses/${courseId}?include[]=term&include[]=teachers`);
   const course = { id: courseId, course_code: clip(data?.course_code, 100), name: clip(data?.name, 300) };
   const term = clip(data?.term?.name, 50);
-  if (term) course.term = { name: term };
+  if (term) {
+    course.term = { name: term };
+    const start = isoDay(data.term.start_at);
+    const end = isoDay(data.term.end_at);
+    if (start) course.term.start = start;
+    if (end) course.term.end = end;
+  }
+  const names = (Array.isArray(data?.teachers) ? data.teachers : []).map((t) => clip(t?.display_name, 200)).filter(Boolean);
+  course.instructors = [...new Set(names)].slice(0, MAX_INSTRUCTORS);
   return course;
+}
+
+/** Section names only, e.g. "A00". Students cannot always list sections, so callers treat a failure as none. */
+export async function fetchSections(fetchFn, courseId) {
+  const raw = await getList(fetchFn, `${CANVAS_ORIGIN}/api/v1/courses/${courseId}/sections?per_page=100`);
+  const names = raw.map((s) => clip(s?.name, 100)).filter(Boolean);
+  return [...new Set(names)].slice(0, MAX_SECTIONS);
 }
 
 /** Allowlisted file fields. The signed download url Canvas returns is dropped here. */
@@ -99,4 +123,15 @@ export async function findMediaGalleryUrl(fetchFn, courseId) {
   if (!tab) throw new SyncError("NO_MEDIA_GALLERY");
   if (!isCanvasUrl(tab.full_url)) throw new SyncError("TAB_FAILED", "not a Canvas URL");
   return tab.full_url;
+}
+
+/** The student's active courses as { id, course_code } only. */
+export async function fetchMyCourses(fetchFn) {
+  const raw = await getList(fetchFn, `${CANVAS_ORIGIN}/api/v1/courses?enrollment_state=active&per_page=100`);
+  const out = [];
+  for (const c of raw) {
+    const code = clip(c?.course_code, 100);
+    if (Number.isSafeInteger(c?.id) && c.id >= 1 && code) out.push({ id: c.id, course_code: code });
+  }
+  return out;
 }

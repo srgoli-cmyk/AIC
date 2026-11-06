@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lecture Search</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap"
+    />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="./" id="home-link"><span class="brand-dot"></span>Lecture Search</a>
+        <div class="top-right">
+          <span id="mode" class="mode" hidden>Demo data</span>
+          <span id="health" class="health" title="Backend status"><i></i><span>Checking</span></span>
+        </div>
+      </header>
+
+      <main>
+        <section id="notice" class="notice" hidden></section>
+
+        <!-- Home: every synced course -->
+        <section id="home" hidden>
+          <div class="intro">
+            <h1>Your <span class="accent">courses.</span></h1>
+            <p class="lede">Sync a course from Canvas with the extension, then pick it here.</p>
+          </div>
+          <div id="course-grid" class="course-grid"></div>
+        </section>
+
+        <!-- One course -->
+        <section id="course" hidden>
+          <div class="course-head">
+            <div class="eyebrow" id="c-term"></div>
+            <h1 id="c-code"></h1>
+            <p class="course-name" id="c-name"></p>
+            <ul class="facts" id="c-facts"></ul>
+            <p class="coverage" id="c-note" hidden></p>
+          </div>
+
+          <div class="course-body">
+            <aside class="lectures">
+              <div class="lectures-top">
+                <div class="eyebrow" id="l-count"></div>
+                <div class="chips" id="sections" role="radiogroup" aria-label="Section"></div>
+              </div>
+              <ol id="lecture-list" class="lecture-list"></ol>
+            </aside>
+
+            <div class="focus">
+              <div id="scope" class="scope"></div>
+              <form id="ask" class="ask" autocomplete="off">
+                <label class="sr" for="q">Question</label>
+                <textarea id="q" rows="1" maxlength="2000"></textarea>
+                <button class="cta small" id="go" type="submit">
+                  Ask
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                </button>
+              </form>
+
+              <section id="result" class="result" hidden>
+                <article class="answer">
+                  <div class="eyebrow" id="asked"></div>
+                  <div class="answer-body" id="answer"></div>
+                </article>
+                <div class="sources">
+                  <div class="eyebrow">Sources</div>
+                  <ol id="sources"></ol>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>

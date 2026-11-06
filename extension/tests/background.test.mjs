@@ -69,3 +69,37 @@ test("startup recovery marks an interrupted sync and closes its tab", async () =
   assert.equal(stored.syncState.status, "error");
   assert.deepEqual(removed, [77]);
 });
+
+test("the daily alarm is created, and a tick syncs a due course only while the computer is in use", async () => {
+  const stored = { autoSync: { 12345: { on: true, lastSuccess: 0, failures: 0, starts: [] } } };
+  const created = [];
+  let onAlarm;
+  let onState;
+  let state = "idle";
+  const badges = [];
+  globalThis.fetch = makeServer().fetch;
+  globalThis.chrome = {
+    runtime: { id: "me", onMessage: { addListener: () => {} } },
+    idle: { queryState: async () => state, setDetectionInterval: () => {}, onStateChanged: { addListener: (fn) => (onState = fn) } },
+    alarms: { get: async () => undefined, create: async (name, o) => void created.push([name, o]), onAlarm: { addListener: (fn) => (onAlarm = fn) } },
+    action: { setBadgeText: async (b) => void badges.push(b.text), setBadgeBackgroundColor: async () => {} },
+    tabs: { query: async () => [], remove: async () => {}, create: async () => { throw new Error("no tabs in tests"); } },
+    scripting: { executeScript: async () => [] },
+    storage: {
+      local: { get: async (k) => (typeof k === "string" ? { [k]: stored[k] } : stored), set: async (items) => void Object.assign(stored, items) },
+      session: { get: async () => ({}), set: async () => {}, remove: async () => {} },
+    },
+  };
+  await import(`../background.js?${Math.random()}`);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(created, [["autosync", { delayInMinutes: 1, periodInMinutes: 15 }]]);
+  onAlarm({ name: "other" });
+  onAlarm({ name: "autosync" });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(stored.syncState, undefined, "nobody at the computer");
+  state = "active";
+  onState("active");
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(stored.syncState?.courseId, 12345);
+  assert.equal(stored.syncState?.mode, "auto");
+});
