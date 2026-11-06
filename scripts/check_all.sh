@@ -25,9 +25,9 @@ echo "== scripts: console sync snippet (mocked network)"
 node --check scripts/console_sync.js
 node --test scripts/console_sync.test.mjs
 
-echo "== ui: lint and tests (mocked backend)"
-(ruff check ui && ruff format --check ui)
-(cd ui && python3 -m pytest -q -p no:cacheprovider tests)
+echo "== web: syntax and render tests"
+for f in web/src/*.js; do node --check "$f"; done
+node --test web/tests/*.test.mjs
 
 echo "== scripts: shell syntax"
 for f in scripts/*.sh; do bash -n "$f"; done
