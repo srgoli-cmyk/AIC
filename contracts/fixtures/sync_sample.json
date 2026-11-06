@@ -5,7 +5,10 @@
     "canvas_course_id": 999999,
     "code": "MATH 20A",
     "name": "Calculus for Science and Engineering",
-    "term": "FA26"
+    "term": "FA26",
+    "term_start": "2026-09-24",
+    "instructors": ["Synthetic Instructor"],
+    "sections": ["MATH 20A - A00"]
   },
   "lectures": [
     {
@@ -13,6 +16,7 @@
       "entry_id": "1_fake0001",
       "title": "Lecture 8 - Product and Quotient Rules (SYNTHETIC FIXTURE)",
       "recorded_at": "2026-10-12",
+      "recorded_start": "2026-10-12T17:00:00Z",
       "duration_sec": 95.0,
       "media_url": "https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111",
       "captions_srt": "1\n00:00:00,000 --> 00:00:04,500\nOkay, today we look at derivatives of products.\n\n2\n00:00:04,500 --> 00:00:11,000\nA common mistake is to say the derivative of f times g is f prime times g prime.\n\n3\n00:00:11,000 --> 00:00:19,000\nThat is wrong. The product rule says it is f prime times g plus f times g prime.\n\n4\n00:00:19,000 --> 00:00:30,000\nLet us check it on x squared times sine x. We get two x sine x plus x squared cosine x.\n\n5\n00:01:00,000 --> 00:01:35,000\nNext, the quotient rule: low d high minus high d low, over low squared.\n"

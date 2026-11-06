@@ -195,7 +195,18 @@ export function makeServer(opts = {}) {
         if (u.pathname === `/api/v1/courses/${COURSE}`) {
           if (o.courseStatus) return res("", { status: o.courseStatus });
           return res(
-            `while(1);${JSON.stringify({ id: COURSE, course_code: "MATH 20A", name: "Calculus", term: { name: "FA26" }, access_token: "SECRETCANVAS" })}`,
+            `while(1);${JSON.stringify({
+              id: COURSE,
+              course_code: "MATH 20A",
+              name: "Calculus",
+              term: { name: "FA26", start_at: "2026-09-24T07:00:00Z", end_at: null },
+              teachers: [
+                { id: 1, display_name: "Ada Lovelace", avatar_image_url: "https://x/?SECRETAVATAR", html_url: "https://x" },
+                { id: 2, display_name: "Ada Lovelace" },
+                { id: 3, display_name: "  " },
+              ],
+              access_token: "SECRETCANVAS",
+            })}`,
           );
         }
         if (u.pathname === `/api/v1/courses/${COURSE}/files`) {
@@ -206,6 +217,13 @@ export function makeServer(opts = {}) {
             return res(`while(1);${JSON.stringify(o.filePages[p].items)}`, { headers });
           }
           return canvasList([{ id: 7, display_name: "Notes.pdf", "content-type": "application/pdf", url: "https://x/?verifier=SECRETVERIFIER" }]);
+        }
+        if (u.pathname === `/api/v1/courses/${COURSE}/sections`) {
+          if (o.sectionsStatus) return res("", { status: o.sectionsStatus });
+          return canvasList([
+            { id: 11, name: "MATH 20A - A00", sis_section_id: "SECRETSIS", total_students: 300 },
+            { id: 12, name: "MATH 20A - B00" },
+          ]);
         }
         if (u.pathname === `/api/v1/courses/${COURSE}/tabs`) {
           return canvasList(

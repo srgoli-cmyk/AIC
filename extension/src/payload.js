@@ -11,10 +11,16 @@ function toIsoDate(unixSeconds) {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
 
+function toIsoTime(unixSeconds) {
+  if (typeof unixSeconds !== "number" || !Number.isFinite(unixSeconds)) return undefined;
+  return new Date(unixSeconds * 1000).toISOString();
+}
+
 /**
  * @param {object} args
- * @param {object} args.course   Canvas course object: { id, course_code, name, term?: { name } }
- * @param {Array}  args.entries  Kaltura entries: { id, name, duration, createdAt, srt }
+ * @param {object} args.course   Canvas course object: { id, course_code, name, term?: { name, start?, end? },
+ *                                 instructors?: string[], sections?: string[] }
+ * @param {Array}  args.entries  Kaltura entries: { id, name, duration, createdAt, srt, mediaUrl? }
  * @param {Array}  args.files    Canvas file objects: { id, display_name, "content-type" }
  * @param {string} [args.categoryId]  Gallery category (digits); the bare /media/t/<id> link is denied
  * @param {Date}   [args.now]
@@ -36,11 +42,14 @@ export function buildSyncPayload({ course, entries, files, categoryId, now = new
           entry_id: e.id,
           title: e.name,
           duration_sec: Number(e.duration) || 0,
-          media_url: MEDIA_BASE + e.id + (categoryId ? `/${categoryId}` : ""),
+          // A podcast lecture brings its own page; a gallery lecture is linked through its category.
+          media_url: typeof e.mediaUrl === "string" ? e.mediaUrl : MEDIA_BASE + e.id + (categoryId ? `/${categoryId}` : ""),
           captions_srt: e.srt,
         };
         const recorded = toIsoDate(e.createdAt);
         if (recorded) lecture.recorded_at = recorded;
+        const started = toIsoTime(e.createdAt);
+        if (started) lecture.recorded_start = started;
         return lecture;
       }),
     files: files.map((f) => {
@@ -50,5 +59,9 @@ export function buildSyncPayload({ course, entries, files, categoryId, now = new
     }),
   };
   if (course.term?.name) payload.course.term = course.term.name;
+  if (course.term?.start) payload.course.term_start = course.term.start;
+  if (course.term?.end) payload.course.term_end = course.term.end;
+  if (course.instructors?.length) payload.course.instructors = [...course.instructors];
+  if (course.sections?.length) payload.course.sections = [...course.sections];
   return payload;
 }

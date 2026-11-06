@@ -100,9 +100,10 @@ def test_sync_rejects_unknown_fields(path):
 
 
 MEDIA_URL_MESSAGE = (
-    "media_url must be https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId>, "
-    "with no query or fragment"
+    "media_url must be https://canvaskaf.ucsd.edu/media/t/<entryId>/<categoryId> "
+    "or https://podcast.ucsd.edu/watch/<term>/<section>/<n>, with no query or fragment"
 )
+PODCAST = "https://podcast.ucsd.edu/watch/fa26/dsc010_002-000-le/3"
 GOOD = "https://canvaskaf.ucsd.edu/media/t/1_fake0001/111111"
 
 
@@ -127,6 +128,12 @@ def test_pydantic_media_url_pattern_matches_the_json_schema():
         "https://canvaskaf.ucsd.edu/media/other",
         "https://evil.example.com/media/t/1_fake0001/111111",  # another host
         "http://canvaskaf.ucsd.edu/media/t/1_fake0001/111111",  # not https
+        f"{PODCAST}#57",  # podcast with a fragment
+        f"{PODCAST}?x=1",  # podcast with a query
+        "https://podcast.ucsd.edu/watch/fa26/dsc010_002-000-le",  # a section, not a lecture
+        "https://podcast.ucsd.edu/watch/fa26/dsc010_002-000-le/3/kaltura",  # another page
+        "https://podcast.ucsd.edu/watch/fa26/../admin/3",  # not a section
+        "https://podcast.ucsd.edu.evil.example.com/watch/fa26/dsc010_002-000-le/3",  # another host
     ],
 )
 def test_sync_rejects_a_bad_media_url_and_stores_nothing(bad, monkeypatch):
@@ -144,6 +151,18 @@ def test_sync_rejects_a_bad_media_url_and_stores_nothing(bad, monkeypatch):
     # The body holds no caption text and does not echo the rejected value.
     assert payload["lectures"][0]["captions_srt"] not in r.text
     assert set(detail[0]) == {"type", "loc", "msg"}
+
+
+@pytest.mark.parametrize(
+    "good", [GOOD, PODCAST, "https://podcast.ucsd.edu/watch/fa26/math018_004-000-le/13"]
+)
+def test_media_url_accepts_gallery_and_podcast_lectures(good):
+    from app.schemas import MEDIA_URL_RE
+
+    assert MEDIA_URL_RE.fullmatch(good)
+    payload = copy.deepcopy(SAMPLE)
+    payload["lectures"][0]["media_url"] = good
+    jsonschema.validate(payload, SCHEMA)
 
 
 @pytest.mark.integration

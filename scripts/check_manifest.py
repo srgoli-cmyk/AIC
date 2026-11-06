@@ -8,10 +8,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_HOSTS = {
     "https://canvas.ucsd.edu/*",
     "https://canvaskaf.ucsd.edu/*",
+    # Lecture podcasts for every class the student is enrolled in (all lecture sections).
+    "https://podcast.ucsd.edu/*",
     "https://cdnapisec.kaltura.com/*",
     "http://localhost:8000/*",
 }
-ALLOWED_PERMISSIONS = {"scripting", "tabs", "storage"}
+# alarms + idle: the daily auto-sync (wake up, check someone is at the computer). Neither gives
+# host access or shows an install warning.
+ALLOWED_PERMISSIONS = {"scripting", "tabs", "storage", "alarms", "idle"}
 
 
 def main() -> int:

@@ -29,6 +29,14 @@ ALTER TABLE lectures ADD COLUMN IF NOT EXISTS lecture_no   INTEGER;
 ALTER TABLE lectures ADD COLUMN IF NOT EXISTS section      TEXT;
 ALTER TABLE lectures ADD COLUMN IF NOT EXISTS chunked_hash TEXT;
 
+-- Course details for the course page, and when each recording started (Kaltura createdAt), which
+-- the page uses to show the usual meeting days and time. Added after the tables first shipped.
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS term_start     DATE;
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS term_end       DATE;
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS instructors    TEXT[];
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS sections       TEXT[];
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS recorded_start TIMESTAMPTZ;
+
 -- Course files (metadata only). A sync never deletes rows here.
 CREATE TABLE IF NOT EXISTS files (
     canvas_file_id BIGINT PRIMARY KEY,

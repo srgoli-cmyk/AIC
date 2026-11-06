@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fetchCourse, fetchFiles, findMediaGalleryUrl, getList, nextLink, parseCourseId, stripPrefix } from "../src/canvas.js";
+import { fetchCourse, fetchFiles, fetchSections, findMediaGalleryUrl, getList, nextLink, parseCourseId, stripPrefix } from "../src/canvas.js";
 import { COURSE, makeServer, res } from "./helpers.mjs";
 
 test("parses the course id from a Canvas course URL", () => {
@@ -44,9 +44,21 @@ test("reads the next link and ignores other relations", () => {
 test("course: prefix stripped, only allowlisted fields, sent with cookies", async () => {
   const server = makeServer();
   const course = await fetchCourse(server.fetch, COURSE);
-  assert.deepEqual(course, { id: COURSE, course_code: "MATH 20A", name: "Calculus", term: { name: "FA26" } });
-  assert.ok(server.requests[0].url.endsWith("/api/v1/courses/12345?include[]=term"));
+  assert.deepEqual(course, {
+    id: COURSE,
+    course_code: "MATH 20A",
+    name: "Calculus",
+    term: { name: "FA26", start: "2026-09-24" },
+    instructors: ["Ada Lovelace"],
+  });
+  assert.ok(server.requests[0].url.endsWith("/api/v1/courses/12345?include[]=term&include[]=teachers"));
   assert.equal(server.requests[0].init.credentials, "include");
+});
+
+test("sections: names only, nothing else from Canvas", async () => {
+  const server = makeServer();
+  assert.deepEqual(await fetchSections(server.fetch, COURSE), ["MATH 20A - A00", "MATH 20A - B00"]);
+  assert.ok(server.requests[0].url.endsWith("/api/v1/courses/12345/sections?per_page=100"));
 });
 
 test("course failure throws without echoing anything", async () => {

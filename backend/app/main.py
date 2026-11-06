@@ -5,11 +5,13 @@ chunked and embedded in the background (app/ingest.py); /ask answers from the st
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from . import answer, db, ingest
@@ -17,6 +19,7 @@ from .config import settings
 from .schemas import (
     AskRequest,
     AskResponse,
+    CourseDetail,
     CourseSummary,
     LectureStatus,
     SyncPayload,
@@ -140,6 +143,14 @@ def search_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": "search service unavailable"})
 
 
+@app.get("/courses/{course_id}", response_model=CourseDetail)
+def course_detail(course_id: str) -> CourseDetail:
+    course = db.get_course(course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="course not synced")
+    return course
+
+
 @app.get("/courses/{course_id}/lectures", response_model=list[LectureStatus])
 def course_lectures(course_id: str) -> list[LectureStatus]:
     if not db.course_exists(course_id):
@@ -151,4 +162,12 @@ def course_lectures(course_id: str) -> list[LectureStatus]:
 def ask(req: AskRequest) -> AskResponse:
     if not db.course_exists(req.course_id):
         raise HTTPException(status_code=404, detail="course not synced")
-    return answer.answer_question(req.course_id, req.question, req.top_k)
+    if req.entry_id is None:
+        return answer.answer_question(req.course_id, req.question, req.top_k)
+    return answer.answer_question(req.course_id, req.question, req.top_k, entry_id=req.entry_id)
+
+
+# The search page (web/) at /app/, so the extension can link to a course on the same origin.
+WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+if WEB_DIR.is_dir():
+    app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="app")

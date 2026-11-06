@@ -1,7 +1,7 @@
 // The sync orchestrator. Everything it touches is injected (fetch, tabs, scripting, clock), and
 // every step is sequential: one request or one injected call at a time.
 import { confirmBackend, getLectures, postSync } from "./backend.js";
-import { fetchCourse, fetchFiles, findMediaGalleryUrl, isCanvasUrl, parseCourseId } from "./canvas.js";
+import { fetchCourse, fetchFiles, fetchSections, findMediaGalleryUrl, isCanvasUrl, parseCourseId } from "./canvas.js";
 import {
   CATEGORY_POLL_MS,
   CATEGORY_PROBE_MS,
@@ -30,12 +30,16 @@ export function safeCode(code) {
 }
 
 /** Validates what a frame returned for one entry. Only allowlisted fields survive. */
-export function normalizeEntry(raw, entryId) {
-  if (!raw || typeof raw !== "object" || raw.host !== KAF_HOST) return { ok: false, codes: ["FRAME_ERROR"] };
+export function normalizeEntry(raw, entryId, host = KAF_HOST) {
+  if (!raw || typeof raw !== "object" || raw.host !== host) return { ok: false, codes: ["FRAME_ERROR"] };
+  // A podcast page names its own entry; a canvaskaf call was given one.
+  if (entryId == null) entryId = typeof raw.entryId === "string" && ENTRY_ID.test(raw.entryId) ? raw.entryId : null;
+  else if (raw.entryId !== undefined && raw.entryId !== entryId) return { ok: false, codes: ["FRAME_ERROR"] };
   if (raw.ok !== true) {
     const failures = Array.isArray(raw.failures) ? raw.failures.slice(0, 6).map(safeCode) : [];
-    return { ok: false, codes: [safeCode(raw.reason), ...failures] };
+    return { ok: false, codes: [safeCode(raw.reason), ...failures], entryId };
   }
+  if (!entryId) return { ok: false, codes: ["NO_ENTRY"] };
   if (typeof raw.srt !== "string" || !raw.srt.includes("-->")) return { ok: false, codes: ["BAD_RESULT"] };
   if (raw.srt.length > MAX_SRT) return { ok: false, codes: ["TOO_LARGE"] };
   const name = clipText(raw.title, 300);
@@ -75,7 +79,7 @@ function withDeadline(deps, promise, ms) {
   });
 }
 
-async function runIn(deps, target, func, args, ms) {
+export async function runIn(deps, target, func, args, ms) {
   const results = await withDeadline(deps, deps.scripting.executeScript({ target, func, args }), ms);
   return Array.isArray(results) ? results : [];
 }
@@ -127,11 +131,11 @@ async function readGallery(deps, tabId, frame) {
   return { entryIds, partial, frame };
 }
 
-function bump(map, key) {
+export function bump(map, key) {
   map[key] = (map[key] || 0) + 1;
 }
 
-function courseError(e) {
+export function courseError(e) {
   const detail = e instanceof SyncError ? e.detail : undefined;
   // 401 and 403 are a missing login; Canvas sends a login page (not JSON) when redirected.
   if (detail === "HTTP 401" || detail === "HTTP 403" || detail === "not JSON") return new SyncError("CANVAS_LOGIN", detail);
@@ -140,7 +144,8 @@ function courseError(e) {
 
 /**
  * Runs the whole sync for the course shown in `tabUrl`.
- * Returns { courseId, lectures, pending, finishedAt, notes, skipped } (counts and fixed text only).
+ * Returns { courseId, code, lectures, pending, finishedAt, notes, skipped }: counts, fixed text and
+ * the course code (shown on the popup's link to the course page).
  * deps.tabOpened(id) / deps.tabClosed() let the caller remember the background tab.
  */
 export async function runSync(deps) {
@@ -161,6 +166,11 @@ export async function runSync(deps) {
     throw courseError(e);
   }
   if (!course.course_code || !course.name) throw new SyncError("COURSE_INCOMPLETE");
+  try {
+    course.sections = await fetchSections(fetchFn, courseId);
+  } catch {
+    // Students can't always list sections. The course syncs without them.
+  }
 
   report({ stage: "files", done: 0, total: 0 });
   let files = [];
@@ -281,6 +291,7 @@ export async function runSync(deps) {
   }
   return {
     courseId,
+    code: course.course_code,
     lectures: storedCount,
     pending: todoCount - entries.length,
     finishedAt: new Date(now()).toISOString(),

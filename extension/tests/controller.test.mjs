@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createController } from "../src/controller.js";
-import { formatLastSync, formatState } from "../src/summary.js";
+import { courseLink, formatLastSync, formatState } from "../src/summary.js";
 import { COURSE, baseDeps, fakeClock, makeKaf, makeScripting, makeServer, makeTabs, tracker } from "./helpers.mjs";
 
 function setup({ url = `https://canvas.ucsd.edu/courses/${COURSE}`, server = {}, gate } = {}) {
@@ -106,8 +106,10 @@ test("storage holds only counts, ids, timestamps and fixed text; no secrets", as
   assert.ok(!text.includes("Lecture 1_"), "no titles");
   assert.ok(!text.includes("http"), "no URLs");
   assert.deepEqual(Object.keys(store.syncState).sort(), ["courseId", "status"]);
-  assert.deepEqual(Object.keys(store.lastSync).sort(), ["courseId", "finishedAt", "lectures", "notes", "pending", "skipped"]);
-  for (const w of writes) for (const k of Object.keys(JSON.parse(w))) assert.ok(["syncState", "lastSync"].includes(k));
+  assert.deepEqual(Object.keys(store.lastSync).sort(), ["code", "courseId", "finishedAt", "lectures", "notes", "pending", "skipped"]);
+  for (const w of writes) for (const k of Object.keys(JSON.parse(w))) assert.ok(["syncState", "lastSync", "autoSync"].includes(k));
+  assert.deepEqual(Object.keys(store.autoSync), [String(COURSE)]);
+  assert.deepEqual(Object.keys(store.autoSync[COURSE]).sort(), ["code", "failed", "lastAttempt", "lastSuccess", "lectures", "loginNeeded", "on", "unseen"]);
 });
 
 test("a sync that was running when the worker stopped is marked interrupted", async () => {
@@ -210,8 +212,30 @@ test("popup: reads storage on open, re-renders on change, sync click shows refus
   await els.sync.handlers.click();
   assert.match(els.status.textContent, /already running/);
   await els.ping.handlers.click();
-  assert.deepEqual(sent.map((m) => m.type), ["STATUS", "SYNC", "PING"], "the worker is asked about its status first");
-  assert.deepEqual(order.slice(0, 2), ["STATUS", "storage.get"], "the state is read only after the worker answered");
+  assert.deepEqual(sent.map((m) => m.type), ["STATUS", "SEEN", "SYNC", "PING"], "the worker is asked about its status first");
+  assert.deepEqual(order.slice(0, 3), ["STATUS", "SEEN", "storage.get"], "the state is read only after the worker answered");
   delete globalThis.document;
   delete globalThis.chrome;
+});
+
+test("the course link opens the search page on that course, or nothing without a valid course", () => {
+  const base = "http://localhost:8000";
+  assert.equal(courseLink({ courseId: 12345 }, base, "/app/"), "http://localhost:8000/app/?course=canvas-12345");
+  assert.equal(courseLink(undefined, base, "/app/"), null);
+  assert.equal(courseLink({ courseId: "12345" }, base, "/app/"), null);
+  assert.equal(courseLink({ courseId: 0 }, base, "/app/"), null);
+});
+
+test("the last sync shows the course code when it has one", () => {
+  const text = formatLastSync({ courseId: 12345, code: "MATH 20A", lectures: 3, pending: 0, finishedAt: "x", notes: [] }, () => "T");
+  assert.match(text, /^MATH 20A$/m);
+});
+
+test("Canvas course codes are shortened for display", async () => {
+  const { displayCode } = await import("../src/summary.js");
+  assert.equal(displayCode("MATH018_FA26_001"), "MATH 018");
+  assert.equal(displayCode("DSC010_FA26_001"), "DSC 010");
+  assert.equal(displayCode("MATH 20A"), "MATH 20A");
+  assert.equal(displayCode("ORG_HDSIOrientation_AY2627"), "ORG_HDSIOrientation_AY2627");
+  assert.equal(displayCode(undefined), undefined);
 });

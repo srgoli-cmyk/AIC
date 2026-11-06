@@ -22,6 +22,10 @@ export const MESSAGES = {
   NO_SESSION_FOUND: `No Kaltura session was found on any lecture page. The assumed session prefix is "${KS_PREFIX}"; check it against a real lecture page. Nothing was sent.`,
   KS_IN_PAYLOAD: "Sync stopped: the data to send contained a Kaltura session. Nothing was sent.",
   INTERRUPTED: "The last sync was interrupted.",
+  PODCAST_LOGIN: "Could not open podcast.ucsd.edu. Log in there with your UCSD account, then sync again.",
+  PODCAST_NONE: "podcast.ucsd.edu lists no recordings for your classes this quarter.",
+  NO_CANVAS_MATCH: "None of your podcast classes matched a Canvas course, so nothing was sent.",
+  ALL_FAILED: "No class could be synced.",
   UNKNOWN: "Sync failed.",
 };
 
