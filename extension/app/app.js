@@ -59,10 +59,18 @@ function renderHome() {
   document.title = "Lecture Search";
   if (!state.courses.length) {
     show(null);
-    notice("No courses yet", [
-      "Load the extension from the repo's extension/ folder, open a course on canvas.ucsd.edu and click Sync this course.",
-      "It'll show up here once it's synced.",
-    ]);
+    notice(
+      "No courses yet",
+      api.extension
+        ? [
+            "Click the Lecture Search icon in Chrome's toolbar, then Sync all my classes. You need to be logged in to Canvas and podcast.ucsd.edu.",
+            "Your classes show up here once they're synced.",
+          ]
+        : [
+            "Load the extension from the repo's extension/ folder, open a course on canvas.ucsd.edu and click Sync this course.",
+            "It'll show up here once it's synced.",
+          ]
+    );
     return;
   }
   show("home");
@@ -135,6 +143,20 @@ function renderCourseHead() {
   const note = coverageNote(lecSecs);
   $("c-note").hidden = !note;
   $("c-note").textContent = note;
+  $("c-remove").hidden = !api.extension || api.demo;
+}
+
+async function removeCourse() {
+  const c = state.course;
+  if (!c || !confirm(`Remove ${prettyCode(c.code)} and its lecture captions from this browser? Syncing again brings it back.`)) return;
+  try {
+    await api.removeCourse(c.course_id);
+  } catch (err) {
+    notice("Couldn't remove the course", [err.message]);
+    return;
+  }
+  state.course = null;
+  go({});
 }
 
 function renderSections() {
@@ -329,9 +351,44 @@ async function route() {
   renderCourse();
 }
 
+function showIndexing(p) {
+  if (api.demo) return;
+  if (p && p.total > 0) setHealth("wait", `Indexing ${p.done}/${p.total}`);
+  else setHealth("up", "On this device");
+}
+
+let lastIndexing = null;
+function indexingChanged(p) {
+  showIndexing(p);
+  const prev = lastIndexing;
+  lastIndexing = p;
+  // A course finished indexing: refresh what's on screen so its lectures stop showing "indexing".
+  // The answer being read stays as it is.
+  if (prev && (!p || p.courseId !== prev.courseId)) refresh().catch(() => {});
+}
+
+async function refresh() {
+  if (state.course) {
+    const fresh = await api.course(state.course.course_id);
+    if (fresh.course_id !== state.course?.course_id) return;
+    state.course = fresh;
+    state.lecture = fresh.lectures.find((l) => l.entry_id === state.lecture?.entry_id) || null;
+    renderCourseHead();
+    renderLectures();
+  } else if (!$("home").hidden || !$("notice").hidden) {
+    route();
+  }
+}
+
 async function start() {
   $("mode").hidden = !api.demo;
   setHealth("wait", "Checking");
+  if (api.extension && !api.demo) {
+    lastIndexing = await api.indexing(indexingChanged).catch(() => null);
+    showIndexing(lastIndexing);
+    route();
+    return;
+  }
   if (!(await api.health())) {
     setHealth("down", "Backend offline");
     show(null);
@@ -372,6 +429,7 @@ $("answer").addEventListener("click", (e) => {
   void li.offsetWidth;
   li.classList.add("flash");
 });
+$("c-remove").addEventListener("click", removeCourse);
 $("home-link").addEventListener("click", (e) => {
   e.preventDefault();
   go({});

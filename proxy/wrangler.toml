@@ -1,0 +1,20 @@
+# Cloudflare Worker: the answer service for the standalone extension. See proxy/README.md.
+name = "lecture-search-answer"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+OPENROUTER_MODEL = "openai/gpt-4o-mini"
+# Set to the store extension's origin once it has an id, e.g. "chrome-extension://abcdefghijklmnopabcdefghijklmnop".
+# Empty allows any origin (fine for a first test, not for launch).
+ALLOWED_ORIGINS = ""
+
+# 20 questions per minute per install (or per IP when there is no install id).
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+# Secret, set once with: npx wrangler secret put OPENROUTER_API_KEY

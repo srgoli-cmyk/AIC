@@ -1,6 +1,6 @@
 // The sync orchestrator. Everything it touches is injected (fetch, tabs, scripting, clock), and
 // every step is sequential: one request or one injected call at a time.
-import { confirmBackend, getLectures, postSync } from "./backend.js";
+import { httpStore } from "./backend.js";
 import { fetchCourse, fetchFiles, fetchSections, findMediaGalleryUrl, isCanvasUrl, parseCourseId } from "./canvas.js";
 import {
   CATEGORY_POLL_MS,
@@ -150,13 +150,15 @@ export function courseError(e) {
  */
 export async function runSync(deps) {
   const { fetch: fetchFn, tabs, backendUrl, report, now } = deps;
+  // The IndexedDB store when the extension runs on its own; the local HTTP backend otherwise.
+  const store = deps.store ?? httpStore(fetchFn, backendUrl);
   const courseId = parseCourseId(deps.tabUrl);
   if (!courseId) throw new SyncError("NOT_COURSE_PAGE");
   const notes = [];
   const skipped = {};
 
   report({ stage: "backend", done: 0, total: 0 });
-  await confirmBackend(fetchFn, backendUrl);
+  await store.confirm();
 
   report({ stage: "course", done: 0, total: 0 });
   let course;
@@ -208,7 +210,7 @@ export async function runSync(deps) {
     categoryId = CATEGORY_ID.test(String(frame.categoryId)) ? String(frame.categoryId) : undefined;
     if (gallery.partial) notes.push(`The gallery list may be incomplete (${gallery.partial}).`);
 
-    storedBefore = new Map((await getLectures(fetchFn, backendUrl, courseId)).map((l) => [l.entry_id, l.has_captions]));
+    storedBefore = new Map((await store.lectures(courseId)).map((l) => [l.entry_id, l.has_captions]));
     const wanted = gallery.entryIds.filter((id) => storedBefore.get(id) !== true);
     todoCount = wanted.length;
     // Only what fits in one sync is read, so nothing is downloaded and then dropped.
@@ -276,14 +278,14 @@ export async function runSync(deps) {
 
   report({ stage: "sending", done: 0, total: 0 });
   const payload = buildSyncPayload({ course, entries, files, categoryId, now: new Date(now()) });
-  const reply = await postSync(fetchFn, backendUrl, payload);
+  const reply = await store.save(payload);
   if (reply.skippedOtherCourse) {
     notes.push(`${reply.skippedOtherCourse} lectures already belong to another course and were left unchanged.`);
   }
 
   let storedCount;
   try {
-    storedCount = (await getLectures(fetchFn, backendUrl, courseId)).length;
+    storedCount = (await store.lectures(courseId)).length;
   } catch {
     // The sync itself succeeded; estimate from what was known.
     storedCount = new Set([...storedBefore.keys(), ...entries.map((e) => e.id)]).size;

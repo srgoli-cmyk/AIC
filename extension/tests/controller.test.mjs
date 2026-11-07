@@ -197,7 +197,7 @@ test("popup: reads storage on open, re-renders on change, sync click shows refus
   const order = [];
   globalThis.document = { getElementById: element };
   globalThis.chrome = {
-    runtime: { sendMessage: async (m) => (sent.push(m), order.push(m.type), m.type === "SYNC" ? { ok: false, error: "A sync is already running." } : { ok: true }) },
+    runtime: { getURL: (p) => `chrome-extension://me/${p}`, sendMessage: async (m) => (sent.push(m), order.push(m.type), m.type === "SYNC" ? { ok: false, error: "A sync is already running." } : { ok: true }) },
     storage: {
       local: { get: async () => (order.push("storage.get"), { lastSync: { courseId: 5, lectures: 1, pending: 0, finishedAt: "2026-11-03T12:00:00.000Z", notes: [], skipped: {} } }) },
       onChanged: { addListener: (fn) => (listener = fn) },

@@ -20,7 +20,7 @@ function cleanState(s) {
   return out;
 }
 
-export function createController({ chrome, fetch, backendUrl, now, sleep, keepAlive, onAuto, onIdle }) {
+export function createController({ chrome, fetch, backendUrl, store, now, sleep, keepAlive, onAuto, onIdle }) {
   let running = false;
   const save = (state) => chrome.storage.local.set({ syncState: cleanState(state) });
 
@@ -48,6 +48,15 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
   }
 
   async function ping() {
+    if (store) {
+      // Standalone: the lecture store lives in this browser, so "up" means it opens.
+      try {
+        await store.confirm();
+        return { ok: true, status: 200, body: { status: "ok", storage: "this browser" } };
+      } catch (e) {
+        return { ok: false, error: e instanceof SyncError ? e.message : "Storage check failed." };
+      }
+    }
     try {
       await confirmBackend(fetch, backendUrl);
       const r = await fetch(`${backendUrl}/health`);
@@ -80,6 +89,7 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         tabs: chrome.tabs,
         scripting: chrome.scripting,
         backendUrl,
+        store,
         now,
         sleep,
         report: (patch) => void report(patch),

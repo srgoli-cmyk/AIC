@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture Search privacy</title>
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
+<style>
+  :root { --bg: #f7f7f4; --fg: #1b1d1a; --muted: #5d625a; --line: #dcddd6; --accent: #4f6b00; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141613; --fg: #ecede7; --muted: #a3a89e; --line: #2c2f2a; --accent: #c6f04a; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 "Inter Tight", system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; }
+  p, li { color: var(--fg); }
+  .muted { color: var(--muted); font-size: 14px; }
+  ul { padding-left: 20px; }
+  code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 14px; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<h1>Privacy policy</h1>
+<p class="muted">Lecture Search for UCSD. Last updated November 7, 2026.</p>
+
+<p>Lecture Search is a student project. It lets you search the lecture recordings of your own UCSD
+courses and ask questions about them. This page says what it reads, where that goes, and how to
+delete it.</p>
+
+<h2>What it reads</h2>
+<p>Only when you press Sync (or when you turn on daily sync for a course), and only from sites you
+are already signed in to:</p>
+<ul>
+  <li>From Canvas: the course code, name, term, instructors, sections and the names of course files.</li>
+  <li>From the course's Kaltura media gallery and from podcast.ucsd.edu: each lecture's title, date,
+    length, link and captions.</li>
+</ul>
+<p>It never reads or keeps your password, cookies or login sessions. It does not read your grades,
+messages, submissions or any site other than the four listed in its permissions.</p>
+
+<h2>Where it is stored</h2>
+<p>Everything it reads is stored in this browser only (Chrome's extension storage and IndexedDB on
+your computer). The search index is built on your computer by a small model that ships inside the
+extension. None of it is sent to us, and we run no server that stores your lectures.</p>
+
+<h2>What leaves your computer when you ask a question</h2>
+<p>To write an answer, the extension sends three things to our answer service:</p>
+<ul>
+  <li>your question,</li>
+  <li>up to 12 short caption excerpts that matched it, each labeled with a lecture number and time,</li>
+  <li>a random ID made when the extension was installed, used only to limit how many questions can be
+    asked per minute.</li>
+</ul>
+<p>The answer service passes the question and excerpts to OpenRouter, which sends them to an AI
+model (currently OpenAI's GPT-4o mini) and returns the answer. The answer service does not store
+questions, excerpts or answers, and its logs hold only counts and status codes. OpenRouter and the
+model provider handle the request under their own privacy policies. No course names, file names,
+links or full transcripts are sent.</p>
+
+<h2>What we never do</h2>
+<ul>
+  <li>No ads, analytics or tracking.</li>
+  <li>We do not sell or share your data, or use it for anything except answering your question.</li>
+  <li>We do not share one student's lectures with another student.</li>
+</ul>
+<p>The use of information received from Chrome APIs follows the
+<a href="https://developer.chrome.com/docs/webstore/program-policies/limited-use">Chrome Web Store
+User Data Policy</a>, including the Limited Use requirements.</p>
+
+<h2>Deleting your data</h2>
+<p>Open Lecture Search, pick a course and choose "Remove from this browser" to delete that course.
+Removing the extension from Chrome deletes everything it stored.</p>
+
+<hr>
+<p class="muted">Questions: <span id="contact">lecture-search team, see the Chrome Web Store listing for a contact email</span>.</p>
+</main>
+</body>
+</html>

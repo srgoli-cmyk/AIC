@@ -1,4 +1,4 @@
-.PHONY: setup db db-reset dev web start check smoke
+.PHONY: setup db db-reset dev web start check smoke vendor proxy-dev package
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -21,8 +21,21 @@ db-reset:
 dev:
 	cd backend && ../$(VENV)/bin/uvicorn app.main:app --reload --port $(PORT)
 
+# The search page in demo mode: http://127.0.0.1:5173/app.html?demo
 web:
-	python3 -m http.server 5173 --bind 127.0.0.1 --directory web
+	python3 -m http.server 5173 --bind 127.0.0.1 --directory extension
+
+# Model, embedding runtime, KaTeX and fonts into extension/vendor/ (checksums verified).
+vendor:
+	cd extension && npm ci && node ../scripts/vendor_extension.mjs
+
+# The answer service on http://localhost:8787 (reads OPENROUTER_API_KEY from .env).
+proxy-dev:
+	node proxy/dev.mjs
+
+# Chrome Web Store zip in dist/. Needs ASK_PROXY_URL=https://... (the deployed answer service).
+package:
+	node scripts/package_extension.mjs
 
 start:
 	VENV="$(VENV)" PORT="$(PORT)" bash scripts/start.sh

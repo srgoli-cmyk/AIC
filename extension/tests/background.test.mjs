@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { IDBFactory } from "fake-indexeddb";
 import { makeServer } from "./helpers.mjs";
 
 // background.js talks to the global chrome and fetch, so each import gets fakes first.
@@ -7,6 +8,7 @@ async function load({ server = makeServer(), stored = {}, session = {} } = {}) {
   let listener;
   const removed = [];
   globalThis.fetch = server.fetch;
+  globalThis.indexedDB = new IDBFactory(); // lectures are stored in the browser
   globalThis.chrome = {
     runtime: { id: "me", onMessage: { addListener: (fn) => (listener = fn) } },
     tabs: { query: async () => [{ url: "https://example.com/" }], remove: async (id) => void removed.push(id) },
@@ -30,6 +32,7 @@ const ask = (listener, msg, sender = { id: "me" }) =>
 test.afterEach(() => {
   delete globalThis.chrome;
   delete globalThis.fetch;
+  delete globalThis.indexedDB;
 });
 
 test("messages from another sender are ignored", async () => {
@@ -46,7 +49,7 @@ test("unknown messages are not answered", async () => {
 
 test("PING and SYNC are routed to the controller", async () => {
   const { listener } = await load();
-  assert.deepEqual(await ask(listener, { type: "PING" }), { ok: true, status: 200, body: { status: "ok" } });
+  assert.deepEqual(await ask(listener, { type: "PING" }), { ok: true, status: 200, body: { status: "ok", storage: "this browser" } });
   const sync = await ask(listener, { type: "SYNC" });
   assert.equal(sync.ok, false);
   assert.match(sync.error, /Open a Canvas course page/);

@@ -1,7 +1,7 @@
 // Syncs every class podcast.ucsd.edu shows under My Podcasts, with all of its lecture sections, in
 // one run. Each class is stored under the student's Canvas course for it. Like sync.js, everything
 // is injected and every step is sequential.
-import { confirmBackend, getLectures, postSync } from "./backend.js";
+import { httpStore } from "./backend.js";
 import { fetchCourse, fetchMyCourses, fetchSections } from "./canvas.js";
 import {
   ENTRY_CALL_MS,
@@ -53,13 +53,15 @@ async function callTab(deps, tabId, func, args, ms) {
  */
 export async function runAllSync(deps) {
   const { fetch: fetchFn, tabs, backendUrl, report, now } = deps;
+  // The IndexedDB store when the extension runs on its own; the local HTTP backend otherwise.
+  const store = deps.store ?? httpStore(fetchFn, backendUrl);
   const notes = [];
   const skipped = {};
   const courses = [];
   let pending = 0;
 
   report({ stage: "backend", done: 0, total: 0 });
-  await confirmBackend(fetchFn, backendUrl);
+  await store.confirm();
 
   report({ stage: "canvas", done: 0, total: 0 });
   let canvasCourses;
@@ -116,7 +118,7 @@ export async function runAllSync(deps) {
       let stored;
       let course;
       try {
-        stored = await getLectures(fetchFn, backendUrl, cls.courseId);
+        stored = await store.lectures(cls.courseId);
         course = await fetchCourse(fetchFn, cls.courseId);
         if (!course.course_code || !course.name) throw new SyncError("COURSE_INCOMPLETE");
         try {
@@ -194,14 +196,14 @@ export async function runAllSync(deps) {
       try {
         if (entries.length) {
           report({ stage: "sending", done, total });
-          const reply = await postSync(fetchFn, backendUrl, buildSyncPayload({ course, entries, files: [], now: new Date(now()) }));
+          const reply = await store.save(buildSyncPayload({ course, entries, files: [], now: new Date(now()) }));
           if (reply.skippedOtherCourse) {
             notes.push(`${reply.skippedOtherCourse} lectures already belong to another course and were left unchanged.`);
           }
         }
         let count;
         try {
-          count = (await getLectures(fetchFn, backendUrl, cls.courseId)).length;
+          count = (await store.lectures(cls.courseId)).length;
         } catch {
           count = new Set([...before, ...entries.map((e) => e.id)]).size;
         }

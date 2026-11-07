@@ -1,11 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Lecture Sync (dev)",
-  "version": "0.0.1",
-  "description": "Syncs lecture captions from Canvas and podcast.ucsd.edu to the local AI Lecture Search backend.",
+  "name": "Lecture Search for UCSD",
+  "short_name": "Lecture Search",
+  "version": "0.1.0",
+  "description": "Search your UCSD lecture recordings and ask questions. Answers link to the exact moment in the lecture.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_title": "Lecture Sync",
-    "default_popup": "popup.html"
+    "default_title": "Lecture Search",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
   },
   "background": {
     "service_worker": "background.js",
@@ -13,16 +24,21 @@
   },
   "permissions": [
     "scripting",
-    "tabs",
     "storage",
+    "unlimitedStorage",
     "alarms",
-    "idle"
+    "idle",
+    "offscreen"
   ],
   "host_permissions": [
     "https://canvas.ucsd.edu/*",
     "https://canvaskaf.ucsd.edu/*",
     "https://podcast.ucsd.edu/*",
     "https://cdnapisec.kaltura.com/*",
-    "http://localhost:8000/*"
-  ]
+    "http://localhost:8787/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "minimum_chrome_version": "116"
 }

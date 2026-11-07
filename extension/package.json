@@ -4,5 +4,14 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource/inter-tight": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@huggingface/transformers": "3.8.1",
+    "katex": "0.16.11"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.7"
   }
 }

@@ -54,6 +54,15 @@ export function looksLikeSession(text) {
   return KS_SHAPE.test(text);
 }
 
+/** The local HTTP backend as a store: the same calls the IndexedDB store (local/store.js) has. */
+export function httpStore(fetchFn, base) {
+  return {
+    confirm: () => confirmBackend(fetchFn, base),
+    lectures: (canvasCourseId) => getLectures(fetchFn, base, canvasCourseId),
+    save: (payload) => postSync(fetchFn, base, payload),
+  };
+}
+
 export async function postSync(fetchFn, base, payload) {
   const body = JSON.stringify(payload);
   if (looksLikeSession(body)) throw new SyncError("KS_IN_PAYLOAD");

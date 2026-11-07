@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { answerHtml, renderMath, safeUrl, sourceLabel } from "../src/render.js";
+import { answerHtml, renderMath, safeUrl, sourceLabel } from "../app/render.js";
 
 const SOURCE = {
   lecture_title: "Lecture 8 - Product Rule [A00]",

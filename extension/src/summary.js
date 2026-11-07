@@ -1,7 +1,7 @@
 // Text for the popup, built from what the worker keeps in chrome.storage.local.
 
 const STAGES = {
-  backend: "Checking the backend",
+  backend: "Getting ready",
   course: "Reading the course",
   files: "Reading course files",
   gallery: "Opening the Media Gallery",
@@ -9,7 +9,7 @@ const STAGES = {
   classes: "Opening podcast.ucsd.edu",
   lectures: "Listing lectures",
   captions: "Reading captions",
-  sending: "Sending to the backend",
+  sending: "Saving lectures",
 };
 
 /** "MATH 018" from Canvas codes like "MATH018_FA26_001"; other codes as they are. */

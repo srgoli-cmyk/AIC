@@ -1,7 +1,13 @@
-export const BACKEND_URL = "http://localhost:8000";
+// Standalone (the Chrome Web Store build): lectures are stored and searched in this browser, and
+// only the answer step calls out, to ASK_URL. scripts/package_extension.mjs replaces ASK_URL with
+// the deployed proxy's address (and the manifest's matching host permission) when it builds the
+// store zip; this localhost value is for `make proxy-dev`.
+export const ASK_URL = "http://localhost:8787/v1/answer";
+// The search page inside the extension; ?course=<course_id> opens that course.
+export const APP_PAGE = "app.html";
+
+// The optional team backend (backend/) answers /health with this title.
 export const BACKEND_TITLE = "AI Lecture Search";
-// The backend serves the search page here; ?course=<course_id> opens that course.
-export const WEB_PATH = "/app/";
 
 export const CANVAS_HOST = "canvas.ucsd.edu";
 export const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;

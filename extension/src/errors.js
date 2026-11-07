@@ -8,6 +8,8 @@ export const MESSAGES = {
   BACKEND_DOWN: "Cannot reach the backend on localhost:8000. Start it and try again.",
   BACKEND_OTHER: "Port 8000 is answered by another app, not AI Lecture Search. Stop it and start the backend.",
   BACKEND_REJECTED: "The backend rejected the sync.",
+  STORE_FAILED: "Could not save to this browser's storage. Check that Chrome has free disk space, then sync again.",
+  STORE_REJECTED: "The synced data did not pass the checks, so nothing was saved.",
   CANVAS_FAILED: "Canvas request failed.",
   CANVAS_LOGIN: "Could not read the course from Canvas. Log in to Canvas and try again.",
   COURSE_INCOMPLETE: "Canvas returned a course without a code or name.",

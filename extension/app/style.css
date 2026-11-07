@@ -204,3 +204,4 @@ a.source-head:hover .open { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.link.remove { font-size: 13px; padding-top: 12px; }

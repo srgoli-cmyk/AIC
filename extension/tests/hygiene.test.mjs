@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 
 const root = new URL("../", import.meta.url);
+// The worker, popup, offscreen document and everything under src/ (the app page's own files in
+// app/ also talk to the optional team backend, so they are checked separately).
 const sources = [
   ...readdirSync(root).filter((f) => f.endsWith(".js")),
-  ...readdirSync(new URL("src/", root)).map((f) => `src/${f}`),
+  ...readdirSync(new URL("src/", root), { recursive: true })
+    .filter((f) => f.endsWith(".js"))
+    .map((f) => `src/${f}`),
 ];
 
 test("extension code never logs", () => {
@@ -17,7 +21,8 @@ test("extension code never logs", () => {
 });
 
 test("only the payload module builds the sync body", () => {
-  for (const f of sources.filter((f) => f !== "src/payload.js")) {
+  // validate.js only checks a body before it is stored.
+  for (const f of sources.filter((f) => f !== "src/payload.js" && f !== "src/local/validate.js")) {
     assert.doesNotMatch(readFileSync(new URL(f, root), "utf8"), /schema_version/, f);
   }
 });

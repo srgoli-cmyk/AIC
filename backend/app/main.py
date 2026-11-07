@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
@@ -167,7 +167,13 @@ def ask(req: AskRequest) -> AskResponse:
     return answer.answer_question(req.course_id, req.question, req.top_k, entry_id=req.entry_id)
 
 
-# The search page (web/) at /app/, so the extension can link to a course on the same origin.
-WEB_DIR = Path(__file__).resolve().parents[2] / "web"
-if WEB_DIR.is_dir():
-    app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="app")
+# The search page now ships inside the extension (extension/app.html). For the team backend it is
+# also served at /ext/app.html, and the old /app/ address redirects there.
+EXT_DIR = Path(__file__).resolve().parents[2] / "extension"
+if EXT_DIR.is_dir():
+    app.mount("/ext", StaticFiles(directory=EXT_DIR), name="ext")
+
+    @app.get("/app", include_in_schema=False)
+    @app.get("/app/", include_in_schema=False)
+    def old_app_page() -> RedirectResponse:
+        return RedirectResponse("/ext/app.html", status_code=307)

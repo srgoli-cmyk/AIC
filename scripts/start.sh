@@ -53,7 +53,7 @@ done
 curl -fsS "$BASE/health" >/dev/null 2>&1 || fail "The backend did not answer in 3 minutes."
 
 echo
-echo "Ready. Open $BASE/app/  (Ctrl+C stops everything)"
+echo "Ready. Open $BASE/ext/app.html  (Ctrl+C stops everything)"
 
 # `wait -n` isn't available in the bash that ships with macOS.
 while kill -0 "$backend" 2>/dev/null; do

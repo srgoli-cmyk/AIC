@@ -18,3 +18,7 @@ __pycache__/
 # node / misc
 node_modules/
 .DS_Store
+
+# extension: built from pinned versions by scripts/vendor_extension.mjs; store zips
+extension/vendor/
+dist/

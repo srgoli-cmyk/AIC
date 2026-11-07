@@ -1,7 +1,12 @@
 // Service worker: thin wiring between the popup, the daily auto-sync and the sync controller.
 import { ALARM, ALARM_MINUTES, IDLE_SECONDS, badge, pickDue } from "./src/auto.js";
-import { BACKEND_URL } from "./src/config.js";
 import { createController } from "./src/controller.js";
+import { createIndexer } from "./src/local/indexer.js";
+import { localStore } from "./src/local/store.js";
+
+// Lectures are stored in this browser (IndexedDB) and indexed in an offscreen document.
+const indexer = createIndexer(chrome);
+const store = localStore({ onSaved: () => indexer.kick() });
 
 function showBadge(all) {
   const b = badge(all);
@@ -19,7 +24,7 @@ function keepAlive() {
 const controller = createController({
   chrome,
   fetch: (...args) => fetch(...args),
-  backendUrl: BACKEND_URL,
+  store,
   now: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   keepAlive,
@@ -59,6 +64,17 @@ chrome.runtime.onStartup?.addListener(() => tick().catch(() => {}));
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender?.id !== chrome.runtime.id) return false;
+  if (msg?.target === "offscreen") return false; // for the offscreen document, not the worker
+  // The app page asks for indexing when it opens (catches up after a worker restart); the
+  // offscreen document reports when nothing is left, so it can be closed.
+  if (msg?.type === "INGEST") {
+    indexer.kick().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg?.type === "INGEST_DONE") {
+    indexer.close().catch(() => {});
+    return false;
+  }
   const pending = controller.handle(msg);
   if (!pending) return false;
   pending.then(sendResponse).catch(() => sendResponse({ ok: false, error: "Request failed." }));

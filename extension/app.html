@@ -4,14 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Lecture Search</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap"
-    />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
-    <link rel="stylesheet" href="src/style.css" />
+    <!-- Fonts and KaTeX ship inside the extension (vendor/, see scripts/vendor_extension.mjs):
+         extension pages may not load code from other sites. -->
+    <link rel="stylesheet" href="vendor/fonts/fonts.css" />
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="app/style.css" />
   </head>
   <body>
     <div class="wrap">
@@ -19,7 +16,7 @@
         <a class="brand" href="./" id="home-link"><span class="brand-dot"></span>Lecture Search</a>
         <div class="top-right">
           <span id="mode" class="mode" hidden>Demo data</span>
-          <span id="health" class="health" title="Backend status"><i></i><span>Checking</span></span>
+          <span id="health" class="health" title="Status"><i></i><span>Checking</span></span>
         </div>
       </header>
 
@@ -43,6 +40,7 @@
             <p class="course-name" id="c-name"></p>
             <ul class="facts" id="c-facts"></ul>
             <p class="coverage" id="c-note" hidden></p>
+            <button type="button" class="link remove" id="c-remove" hidden>Remove from this browser</button>
           </div>
 
           <div class="course-body">
@@ -81,7 +79,7 @@
       </main>
     </div>
 
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
-    <script type="module" src="src/app.js"></script>
+    <script defer src="vendor/katex/katex.min.js"></script>
+    <script type="module" src="app/app.js"></script>
   </body>
 </html>

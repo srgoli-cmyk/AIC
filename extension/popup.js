@@ -1,4 +1,4 @@
-import { BACKEND_URL, WEB_PATH } from "./src/config.js";
+import { APP_PAGE } from "./src/config.js";
 import { AUTO_KEY } from "./src/auto.js";
 import { autoLine, courseLink, displayCode, formatState } from "./src/summary.js";
 
@@ -11,7 +11,7 @@ let current = {};
 
 function render() {
   status.textContent = formatState(current.syncState, current.lastSync);
-  const url = current.syncState?.status === "running" ? null : courseLink(current.lastSync, BACKEND_URL, WEB_PATH);
+  const url = current.syncState?.status === "running" ? null : courseLink(current.lastSync, chrome.runtime.getURL("").replace(/\/$/, ""), `/${APP_PAGE}`);
   open.hidden = !url;
   const all = current.lastSync?.mode === "all";
   if (url) {
@@ -49,6 +49,14 @@ open.addEventListener("click", (e) => {
   e.preventDefault();
   if (!open.hidden) chrome.tabs.create({ url: open.href });
 });
+
+// Extension pages open in a new tab, not inside the popup.
+for (const id of ["home", "privacy"]) {
+  document.getElementById(id).addEventListener("click", (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: chrome.runtime.getURL(e.currentTarget.getAttribute("href")) });
+  });
+}
 
 async function send(type) {
   try {
