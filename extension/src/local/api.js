@@ -2,9 +2,10 @@
 // (GET /courses, GET /courses/{id}, POST /ask), answered from this browser's lecture store.
 import { ASK_URL } from "../config.js";
 import { answerQuestion } from "./answer.js";
-import { answerClient } from "./client.js";
-import { courseExists, deleteCourse, getCourse, listCourses, openDb, searchChunks } from "./db.js";
+import { answerClient, studyClient } from "./client.js";
+import { courseExists, deleteCourse, getCourse, lectureHits, listCourses, openDb, searchChunks } from "./db.js";
 import { embedQuery } from "./embedder.js";
+import { studyLecture } from "./study.js";
 
 let dbPromise = null;
 const db = () => (dbPromise ??= openDb());
@@ -31,6 +32,14 @@ export async function ask(courseId, question, entryId) {
     search: (vector, limit) => searchChunks(store, courseId, vector, limit, entryId),
     writeAnswer,
   });
+}
+
+const writeStudy = studyClient(ASK_URL);
+
+/** A lesson, flashcards or practice questions ("teach" | "flashcards" | "quiz") for one lecture. */
+export async function study(entryId, kind) {
+  const store = await db();
+  return studyLecture(kind, { hits: () => lectureHits(store, entryId), writeStudy });
 }
 
 /** Asks the worker to index anything still due (after a worker restart, say). */

@@ -52,6 +52,6 @@ and deploy again. Requests from anywhere else get 403.
 | Method | Path | Answer |
 | --- | --- | --- |
 | GET | `/health` | `{"status":"ok"}` |
-| POST | `/v1/answer` | `{"answer": "..."}`; 403 origin, 413 too big, 422 invalid, 429 rate limit, 502 model failed, 503 no key |
+| POST | `/v1/answer` | `{"answer": "..."}`, or for a study task (`"task": "teach"`, `"flashcards"`, `"quiz"` instead of a question) a lesson, `{"cards": [...]}` or `{"questions": [...]}`; 403 origin, 413 too big, 422 invalid, 429 rate limit, 502 model failed, 503 no key |
 
 Tests: `node --test proxy/tests/*.test.mjs` (no network).

@@ -4,12 +4,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { answerQuestion, NOT_COVERED, NOTHING_INDEXED } from "../src/local/answer.js";
-import { answerClient } from "../src/local/client.js";
+import { answerClient, studyClient } from "../src/local/client.js";
 import {
   dueCourseIds,
   dueLectureIds,
   deleteCourse,
   getCourse,
+  lectureHits,
   lectureStatuses,
   listCourses,
   openDb,
@@ -19,6 +20,7 @@ import {
 } from "../src/local/db.js";
 import { ingestCourse, ModelLoadError } from "../src/local/ingest.js";
 import { localStore } from "../src/local/store.js";
+import { spread, studyLecture } from "../src/local/study.js";
 import { validatePayload } from "../src/local/validate.js";
 
 const A = "1_aaaaaaaa";
@@ -223,4 +225,57 @@ test("the answer client sends only the question, the excerpts and an install id"
   await assert.rejects(limited("q", []), (e) => e.name === "AnswerUnavailable" && /Too many/.test(e.message));
   const down = answerClient("u", { getInstallId: async () => "x", fetchFn: async () => Promise.reject(new TypeError("fail")) });
   await assert.rejects(down("q", []), (e) => e.name === "AnswerUnavailable");
+});
+
+test("study sets come from one lecture's own chunks and link back to the moment", async () => {
+  const db = await fresh();
+  await saveSync(db, payload({ lectures: [lecture(A, "Lecture 1", srt("eigen values")), lecture(B, "Lecture 2", srt("kernel image"))] }));
+  await ingestCourse(db, "canvas-77", fakeEmbed);
+  const hits = () => lectureHits(db, B);
+  assert.ok((await hits()).every((h) => h.entry_id === B));
+  const sent = [];
+  const reply = (make) => async (task, passages) => {
+    sent.push({ task, passages });
+    return make(passages);
+  };
+
+  const cards = await studyLecture("flashcards", { hits, writeStudy: reply((p) => ({ cards: [{ front: "F", back: "B", citation: p[0].citation }, { front: "G", back: "H", citation: "Lecture 9, 0:00" }, { front: "", back: "x" }] })) });
+  assert.equal(cards.cards.length, 2);
+  assert.match(cards.cards[0].source.url, /^https:\/\/podcast\.ucsd\.edu\/watch\/fa26\/math018_004-000-le\/1#\d+$/);
+  assert.equal(cards.cards[1].source, null);
+  assert.equal(sent[0].task, "flashcards");
+  assert.ok(sent[0].passages.every((p) => /kernel image/.test(p.text)));
+
+  const quiz = await studyLecture("quiz", {
+    hits,
+    random: () => 0,
+    writeStudy: reply((p) => ({ questions: [{ question: "Q?", choices: ["right", "w1", "w2", "w3"], answer: 0, why: "y", citation: p[0].citation }] })),
+  });
+  const q = quiz.questions[0];
+  assert.equal(q.choices[q.answer], "right", "the right choice is tracked through the shuffle");
+  assert.notEqual(q.answer, 0);
+
+  const lesson = await studyLecture("teach", { hits, writeStudy: reply((p) => ({ answer: `**Kernels**\nIt is... [${p[0].citation}] and [Lecture 9, 0:00].` })) });
+  assert.equal(lesson.sources.length, 1);
+  assert.doesNotMatch(lesson.answer, /Lecture 9/);
+
+  assert.deepEqual(await studyLecture("teach", { hits: async () => [], writeStudy: async () => ({}) }), { empty: NOTHING_INDEXED });
+  await assert.rejects(studyLecture("flashcards", { hits, writeStudy: async () => ({ cards: [] }) }), (e) => e.name === "AnswerUnavailable");
+  await assert.rejects(studyLecture("essay", { hits, writeStudy: async () => ({}) }));
+});
+
+test("long lectures send an even sample, never more than the service accepts", () => {
+  const items = Array.from({ length: 53 }, (_, i) => i);
+  const picked = spread(items, 20);
+  assert.equal(picked.length, 20);
+  assert.equal(picked[0], 0);
+  assert.equal(picked.at(-1), 52);
+  assert.deepEqual(spread([1, 2, 3], 20), [1, 2, 3]);
+});
+
+test("the study client sends the task and the excerpts, nothing else", async () => {
+  const sent = [];
+  const write = studyClient("u", { getInstallId: async () => "x", fetchFn: async (url, init) => (sent.push(JSON.parse(init.body)), { ok: true, status: 200, json: async () => ({ cards: [] }) }) });
+  assert.deepEqual(await write("flashcards", [{ citation: "Lecture 1, 0:00", text: "t" }]), { cards: [] });
+  assert.deepEqual(sent[0], { task: "flashcards", passages: [{ citation: "Lecture 1, 0:00", text: "t" }] });
 });

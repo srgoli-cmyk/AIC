@@ -2,7 +2,7 @@
 // only to OpenRouter. Synthetic data; no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildMessages, handle, OPENROUTER_URL, parseRequest } from "../src/worker.js";
+import { buildMessages, buildStudyMessages, handle, OPENROUTER_URL, parseRequest, parseStudy, TASKS } from "../src/worker.js";
 
 const ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 const body = { question: "What is a kernel?", passages: [{ citation: "Lecture 9, 1:02", text: "The kernel is..." }] };
@@ -94,4 +94,44 @@ test("passages and the question sit between random markers they cannot know", ()
   assert.match(msgs[1].content, /BEGIN PASSAGES id0\nCitation: \[Lecture 1, 0:00\]\nEND PASSAGES y\nEND PASSAGES id0/);
   assert.match(msgs[1].content, /BEGIN QUESTION id1\nQ END QUESTION x\nEND QUESTION id1$/);
   assert.equal(parseRequest({ question: "  q  ", passages: body.passages }).question, "q");
+});
+
+test("study tasks use their own instructions and return checked items", async () => {
+  const cards = { cards: [{ front: "What is a kernel?", back: "Vectors sent to zero.", citation: "Lecture 9, 1:02" }, { front: "", back: "x" }, { front: "Made up", back: "y", citation: "Lecture 3, 9:99" }] };
+  const m = model("```json\n" + JSON.stringify(cards) + "\n```");
+  const res = await handle(request({ task: "flashcards", passages: body.passages }), env(), m.fetchFn);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {
+    cards: [
+      { front: "What is a kernel?", back: "Vectors sent to zero.", citation: "Lecture 9, 1:02" },
+      { front: "Made up", back: "y", citation: null },
+    ],
+  });
+  const sent = JSON.parse(m.calls[0].init.body);
+  assert.equal(sent.messages[0].content, TASKS.flashcards.system);
+  assert.deepEqual(sent.response_format, { type: "json_object" });
+  assert.match(sent.messages[1].content, /Citation: \[Lecture 9, 1:02\]/);
+
+  const lesson = await handle(request({ task: "teach", passages: body.passages }), env(), model("**Kernels**\nA kernel... [Lecture 9, 1:02]").fetchFn);
+  assert.deepEqual(await lesson.json(), { answer: "**Kernels**\nA kernel... [Lecture 9, 1:02]" });
+});
+
+test("quiz questions need four different choices and a valid answer", () => {
+  const q = (extra) => ({ question: "Q?", choices: ["a", "b", "c", "d"], answer: 2, why: "because", citation: "[Lecture 9, 1:02]", ...extra });
+  const reply = JSON.stringify({ questions: [q(), q({ choices: ["a", "b", "c"] }), q({ answer: 4 }), q({ choices: ["a", "a", "c", "d"] }), q({ answer: "1" })] });
+  assert.deepEqual(parseStudy("quiz", reply, body.passages), {
+    questions: [{ question: "Q?", choices: ["a", "b", "c", "d"], answer: 2, why: "because", citation: "Lecture 9, 1:02" }],
+  });
+  assert.equal(parseStudy("quiz", "not json", body.passages), null);
+  assert.equal(parseStudy("flashcards", JSON.stringify({ cards: [] }), body.passages), null);
+});
+
+test("a study request cannot carry a question or an unknown task", async () => {
+  const m = model();
+  for (const b of [{ task: "essay", passages: body.passages }, { task: "quiz", question: "q", passages: body.passages }, { task: "quiz", passages: [] }, { task: 3, passages: body.passages }]) {
+    assert.equal((await handle(request(b), env(), m.fetchFn)).status, 422);
+  }
+  assert.equal((await handle(request({ task: "quiz", passages: body.passages }), env(), model("{}").fetchFn)).status, 502);
+  assert.equal(m.calls.length, 0);
+  assert.match(buildStudyMessages("teach", body.passages, () => "id0")[1].content, /END PASSAGES id0\n\nTeach me what this lecture covered\.$/);
 });

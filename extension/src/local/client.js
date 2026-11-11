@@ -14,29 +14,45 @@ export async function installId(storage = chrome.storage.local) {
   return id;
 }
 
-/** Returns a writeAnswer(question, passages) function bound to the service URL. */
-export function answerClient(url, { fetchFn = (...a) => fetch(...a), getInstallId = () => installId() } = {}) {
-  return async function writeAnswer(question, passages) {
+/** Returns post(body): sends one request to the service and gives back the parsed reply. */
+function poster(url, { fetchFn = (...a) => fetch(...a), getInstallId = () => installId() } = {}) {
+  return async function post(body) {
     let res;
     try {
       res = await fetchFn(url, {
         method: "POST",
         credentials: "omit",
         headers: { "Content-Type": "application/json", "X-Install-Id": await getInstallId() },
-        body: JSON.stringify({ question, passages }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (e) {
       throw new AnswerUnavailable(e?.name === "TimeoutError" ? "The answer service took too long. Try again." : undefined);
     }
     if (res.status === 429) throw new AnswerUnavailable("Too many questions in a short time. Wait a minute and try again.");
-    let body;
+    let reply;
     try {
-      body = await res.json();
+      reply = await res.json();
     } catch {
       throw new AnswerUnavailable();
     }
-    if (!res.ok || typeof body?.answer !== "string" || !body.answer.trim()) throw new AnswerUnavailable();
-    return body.answer;
+    if (!res.ok || !reply || typeof reply !== "object") throw new AnswerUnavailable();
+    return reply;
   };
+}
+
+/** Returns a writeAnswer(question, passages) function bound to the service URL. */
+export function answerClient(url, deps) {
+  const post = poster(url, deps);
+  return async function writeAnswer(question, passages) {
+    const reply = await post({ question, passages });
+    if (typeof reply.answer !== "string" || !reply.answer.trim()) throw new AnswerUnavailable();
+    return reply.answer;
+  };
+}
+
+/** Returns a writeStudy(task, passages) function: the service's reply for "teach", "flashcards" or "quiz". */
+export function studyClient(url, deps) {
+  const post = poster(url, deps);
+  return (task, passages) => post({ task, passages });
 }

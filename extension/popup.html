@@ -4,15 +4,15 @@
     <meta charset="utf-8" />
     <link rel="stylesheet" href="vendor/fonts/fonts.css" />
     <style>
-      /* Sky: sky blue and white are the quiet colors, hot pink is only on the main action. */
-      :root { --ground: #eaf4fd; --surface: #ffffff; --line: #cfe3f5; --ink: #0f2238; --muted: #5a7189; --quiet: #5aa9e6; --accent: #ff2e8b; --accent-edge: #a8054f; --on-accent: #2b0018; --bad: #c2371f; color-scheme: light; }
+      /* Sky: sky blue and white are the quiet colors, a soft pink is only on the main action. */
+      :root { --ground: #eaf4fd; --surface: #ffffff; --line: #cfe3f5; --ink: #0f2238; --muted: #5a7189; --quiet: #5aa9e6; --accent: #f58bb4; --accent-edge: #d4648f; --on-accent: #3a0d22; --bad: #c2371f; color-scheme: light; }
       * { box-sizing: border-box; }
       body { margin: 0; width: 320px; padding: 18px; background: var(--ground); color: var(--ink); font: 14px/1.45 "Inter Tight", system-ui, sans-serif; }
       .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; margin-bottom: 14px; }
       .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
       button, a.open { display: block; width: 100%; border: 0; border-radius: 12px; padding: 11px 16px; font-family: inherit; font-weight: 600; font-size: 14px; text-align: center; cursor: pointer; text-decoration: none; }
       #sync-all { background: var(--accent); color: var(--on-accent); box-shadow: 0 3px 0 var(--accent-edge); margin-bottom: 3px; transition: transform 0.12s ease, box-shadow 0.12s ease; }
-      #sync-all:hover { background: #ff5aa5; }
+      #sync-all:hover { background: #f79fc1; }
       #sync-all:active { transform: translateY(3px); box-shadow: 0 0 0 var(--accent-edge); }
       button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
       button.secondary { margin-top: 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }

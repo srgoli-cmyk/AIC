@@ -309,6 +309,17 @@ export async function searchChunks(db, courseId, queryVector, limit, entryId) {
   return hits.slice(0, limit);
 }
 
+/** Every chunk of one lecture in lecture order, in the same shape as search hits (no distance). */
+export async function lectureHits(db, entryId) {
+  const tx = db.transaction(["lectures", "chunks"], "readonly");
+  const l = await done(tx.objectStore("lectures").get(entryId));
+  if (!l) return [];
+  const chunks = await done(tx.objectStore("chunks").index("by_entry").getAll(entryId));
+  return chunks
+    .map((c) => ({ entry_id: c.entry_id, lecture_title: l.title, lecture_no: l.lecture_no, media_url: l.media_url, start_sec: c.start_sec, end_sec: c.end_sec, text: c.text }))
+    .sort((a, b) => a.start_sec - b.start_sec);
+}
+
 /** Deletes one course with its lectures and chunks (the "Remove course" button). */
 export async function deleteCourse(db, courseId) {
   const tx = db.transaction(["courses", "lectures", "chunks"], "readwrite");

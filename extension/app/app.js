@@ -1,23 +1,11 @@
 import "./look.js";
 import * as api from "./api.js";
 import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, schedule, sectionsOf, termRange, topic } from "./course.js";
+import { $, el } from "./dom.js";
 import { answerHtml, renderMath, safeUrl, sourceLabel } from "./render.js";
+import { hideStudy, showStudy, STUDY } from "./study.js";
 
-const $ = (id) => document.getElementById(id);
-
-/** A DOM element with text children only: never parses HTML. */
-function el(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === "class") node.className = v;
-    else if (k === "on") for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
-    else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v === true ? "" : v);
-  }
-  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) node.append(c);
-  return node;
-}
-
-const state = { courses: [], course: null, section: "all", lecture: null, busy: false };
+const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask" };
 
 // Links keep ?demo, ?backend and ?look so moving around never drops them.
 function href(params) {
@@ -267,8 +255,8 @@ function renderScope() {
   const l = state.lecture;
   if (!l) {
     $("scope").replaceChildren(
-      el("h2", { class: "scope-title" }, `Anything from all ${state.course.lectures.length} lectures.`),
-      el("p", { class: "scope-sub" }, "Or pick a lecture to focus on just that one.")
+      el("h2", { class: "scope-title" }, "What are you stuck on?"),
+      el("p", { class: "scope-sub" }, `Ask about anything from all ${state.course.lectures.length} lectures, or pick one lecture to study it.`)
     );
     $("q").placeholder = "Ask about anything from class";
     return;
@@ -293,6 +281,34 @@ function renderScope() {
   $("q").placeholder = `Ask about ${topic(l)}`;
 }
 
+// Ask, or one of the study tools. Arrow keys move between the tabs.
+const MODES = [["ask", "Ask"], ...Object.entries(STUDY).map(([id, s]) => [id, s.tab])];
+
+function setMode(mode) {
+  state.mode = mode;
+  renderModes();
+  $("modes").querySelector('[aria-selected="true"]')?.focus();
+}
+
+function renderModes() {
+  keepFocus($("modes"), ".tab", () =>
+    $("modes").replaceChildren(
+      ...MODES.map(([id, label]) =>
+        el(
+          "button",
+          { type: "button", class: "tab", role: "tab", "aria-selected": String(state.mode === id), tabindex: state.mode === id ? "0" : "-1", on: { click: () => setMode(id) } },
+          label
+        )
+      )
+    )
+  );
+  const asking = state.mode === "ask";
+  $("ask-pane").hidden = !asking;
+  $("study").hidden = asking;
+  if (asking) hideStudy();
+  else showStudy(state.mode, state.lecture, setMode);
+}
+
 function selectLecture(l) {
   $("result").hidden = true;
   go({ course: state.course.course_id, lecture: l?.entry_id }, true);
@@ -305,6 +321,7 @@ function renderCourse() {
   renderSections();
   renderLectures();
   renderScope();
+  renderModes();
 }
 
 // ---------- Ask ----------
@@ -464,6 +481,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.target.closest?.("textarea, input, [contenteditable]") || $("course").hidden) return;
   e.preventDefault();
+  if (state.mode !== "ask") setMode("ask");
   $("q").focus();
 });
 function arrowKeys(container, selector, keys) {
@@ -478,6 +496,7 @@ function arrowKeys(container, selector, keys) {
   });
 }
 arrowKeys($("lecture-list"), ".lecture", { ArrowDown: 1, ArrowUp: -1 });
+arrowKeys($("modes"), ".tab", { ArrowRight: 1, ArrowLeft: -1 });
 arrowKeys($("sections"), ".chip", { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 1, ArrowUp: -1 });
 $("q").addEventListener("input", () => {
   $("q").style.height = "auto";

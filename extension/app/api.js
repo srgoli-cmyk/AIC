@@ -3,7 +3,7 @@
 // - ?demo: synthetic data (demo.js);
 // - otherwise: the FastAPI backend (contracts/api.md), for the team's server setup.
 // Errors carry a message that is safe to show.
-import { DEMO_COURSES, demoAnswer, demoCourse } from "./demo.js";
+import { DEMO_COURSES, demoAnswer, demoCourse, demoStudy } from "./demo.js";
 
 const params = new URLSearchParams(location.search);
 export const extension = location.protocol === "chrome-extension:";
@@ -112,6 +112,16 @@ export async function ask(courseId, question, entryId) {
     throw new BackendError("The backend sent an answer this page cannot read.");
   }
   return res;
+}
+
+/** A lesson ("teach"), flashcards or practice questions ("quiz") made from one lecture. */
+export async function study(entryId, kind) {
+  if (demo) {
+    await pause(1200);
+    return demoStudy(kind);
+  }
+  if (extension) return viaLocal((l) => l.study(entryId, kind));
+  throw new BackendError("Study tools work in the Chrome extension. This page is using the team backend.");
 }
 
 /** Only inside the extension: removes a course and everything stored for it. */

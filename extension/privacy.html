@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
 <style>
   /* Sky, like the rest of the extension */
-  :root { --bg: #eaf4fd; --fg: #0f2238; --muted: #5a7189; --line: #cfe3f5; --accent: #cf0a69; color-scheme: light; }
+  :root { --bg: #eaf4fd; --fg: #0f2238; --muted: #5a7189; --line: #cfe3f5; --accent: #b5336d; color-scheme: light; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 "Inter Tight", system-ui, sans-serif; }
   main { max-width: 680px; margin: 0 auto; padding: 48px 16px 64px; }
   h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
@@ -45,11 +45,13 @@ messages, submissions or any site other than the four listed in its permissions.
 your computer). The search index is built on your computer by a small model that ships inside the
 extension. None of it is sent to us, and we run no server that stores your lectures.</p>
 
-<h2>What leaves your computer when you ask a question</h2>
-<p>To write an answer, the extension sends three things to our answer service:</p>
+<h2>What leaves your computer when you ask or study</h2>
+<p>To write an answer, a lesson, flashcards or test questions, the extension sends three things to
+our answer service:</p>
 <ul>
-  <li>your question,</li>
-  <li>up to 12 short caption excerpts that matched it, each labeled with a lecture number and time,</li>
+  <li>your question (study tools send no question, only which of the three you asked for),</li>
+  <li>up to 20 short caption excerpts, each labeled with a lecture number and time: the ones that
+    matched your question, or for study tools a sample spread across the lecture you picked,</li>
   <li>a random ID made when the extension was installed, used only to limit how many questions can be
     asked per minute.</li>
 </ul>
@@ -62,7 +64,7 @@ links or full transcripts are sent.</p>
 <h2>What we never do</h2>
 <ul>
   <li>No ads, analytics or tracking.</li>
-  <li>We do not sell or share your data, or use it for anything except answering your question.</li>
+  <li>We do not sell or share your data, or use it for anything except answering your question or making your study set.</li>
   <li>We do not share one student's lectures with another student.</li>
 </ul>
 <p>The use of information received from Chrome APIs follows the

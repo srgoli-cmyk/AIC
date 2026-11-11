@@ -24,6 +24,8 @@ just yours). Then ask a question in plain English. You get a short answer with c
 [Lecture 8, 14:02], and each citation opens the recording at that moment.
 
 - One click syncs every lecture of a course. Daily sync is optional.
+- Study one lecture three ways: a short lesson, flashcards, or practice test questions. Each links
+  back to the moment in the recording.
 - Search runs on your computer. Your lectures are stored in this browser only.
 - Math in answers is rendered properly.
 - Remove a course, or everything, at any time.
@@ -60,7 +62,7 @@ courses.
 | Host `canvaskaf.ucsd.edu` | The course media gallery (Kaltura). |
 | Host `podcast.ucsd.edu` | Lecture podcasts for every section of the course. |
 | Host `cdnapisec.kaltura.com` | Caption files for the recordings. |
-| Host (answer service) | Sends the question and matching excerpts to get a written answer. |
+| Host (answer service) | Sends the question and matching caption excerpts to get a written answer, lesson, flashcards or test questions. |
 
 **Remote code:** No. All code and the model ship in the package. WebAssembly is used for the
 on-device model (`wasm-unsafe-eval`), loaded from the package only.

@@ -160,7 +160,7 @@ export function sourceUrl(mediaUrl, startSec) {
   return u.toString();
 }
 
-const toSource = (hit) => ({
+export const toSource = (hit) => ({
   lecture_title: hit.lecture_title,
   entry_id: hit.entry_id,
   start_sec: hit.start_sec,

@@ -59,26 +59,30 @@
 
             <div class="focus">
               <div id="scope" class="scope"></div>
-              <form id="ask" class="ask" autocomplete="off">
-                <label class="sr" for="q">Question</label>
-                <textarea id="q" rows="1" maxlength="2000"></textarea>
-                <button class="cta small" id="go" type="submit">
-                  Ask
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                </button>
-              </form>
-              <p class="keys"><span><kbd>Enter</kbd> asks</span><span><kbd>Shift</kbd> <kbd>Enter</kbd> adds a line</span><span><kbd>/</kbd> jumps here</span><span><kbd>↑</kbd> <kbd>↓</kbd> move through lectures</span></p>
+              <div id="modes" class="modes" role="tablist" aria-label="Ask or study"></div>
+              <div id="ask-pane">
+                <form id="ask" class="ask" autocomplete="off">
+                  <label class="sr" for="q">Question</label>
+                  <textarea id="q" rows="1" maxlength="2000"></textarea>
+                  <button class="cta small" id="go" type="submit">
+                    Ask
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                  </button>
+                </form>
+                <p class="keys"><span><kbd>Enter</kbd> asks</span><span><kbd>Shift</kbd> <kbd>Enter</kbd> adds a line</span><span><kbd>/</kbd> jumps here</span><span><kbd>↑</kbd> <kbd>↓</kbd> move through lectures</span></p>
 
-              <section id="result" class="result" hidden>
-                <article class="answer">
-                  <div class="eyebrow" id="asked"></div>
-                  <div class="answer-body" id="answer"></div>
-                </article>
-                <div class="sources">
-                  <div class="eyebrow">Sources</div>
-                  <ol id="sources"></ol>
-                </div>
-              </section>
+                <section id="result" class="result" hidden>
+                  <article class="answer">
+                    <div class="eyebrow" id="asked"></div>
+                    <div class="answer-body" id="answer"></div>
+                  </article>
+                  <div class="sources">
+                    <div class="eyebrow">Sources</div>
+                    <ol id="sources"></ol>
+                  </div>
+                </section>
+              </div>
+              <section id="study" class="study" hidden></section>
             </div>
           </div>
         </section>
