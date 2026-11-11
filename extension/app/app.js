@@ -1,3 +1,4 @@
+import "./look.js";
 import * as api from "./api.js";
 import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, schedule, sectionsOf, termRange, topic } from "./course.js";
 import { answerHtml, renderMath, safeUrl, sourceLabel } from "./render.js";
@@ -18,11 +19,11 @@ function el(tag, props = {}, ...children) {
 
 const state = { courses: [], course: null, section: "all", lecture: null, busy: false };
 
-// Links keep ?demo and ?backend so moving around never drops them.
+// Links keep ?demo, ?backend and ?look so moving around never drops them.
 function href(params) {
   const keep = new URLSearchParams(location.search);
   const out = new URLSearchParams();
-  for (const k of ["demo", "backend"]) if (keep.has(k)) out.set(k, keep.get(k));
+  for (const k of ["demo", "backend", "look"]) if (keep.has(k)) out.set(k, keep.get(k));
   for (const [k, v] of Object.entries(params)) if (v) out.set(k, v);
   const q = out.toString().replace(/demo=(&|$)/, "demo$1");
   return `${location.pathname}${q ? `?${q}` : ""}`;
@@ -159,6 +160,13 @@ async function removeCourse() {
   go({});
 }
 
+/** Redrawing a list must not drop keyboard focus: put it back on the item at the same position. */
+function keepFocus(container, selector, draw) {
+  const at = [...container.querySelectorAll(selector)].indexOf(document.activeElement);
+  draw();
+  if (at >= 0) container.querySelectorAll(selector)[at]?.focus();
+}
+
 function renderSections() {
   const secs = sectionsOf(state.course.lectures);
   if (state.section !== "all" && !secs.includes(state.section)) state.section = "all";
@@ -170,6 +178,7 @@ function renderSections() {
         class: "chip",
         role: "radio",
         "aria-checked": String(state.section === value),
+        tabindex: state.section === value ? "0" : "-1",
         on: {
           click: () => {
             state.section = value;
@@ -183,13 +192,48 @@ function renderSections() {
       },
       label
     );
-  $("sections").replaceChildren(...(secs.length ? [chip("all", "All"), ...secs.map((s) => chip(s, `Section ${s}`))] : []));
+  keepFocus($("sections"), ".chip", () =>
+    $("sections").replaceChildren(...(secs.length ? [chip("all", "All"), ...secs.map((s) => chip(s, `Section ${s}`))] : []))
+  );
+}
+
+const STRIP_HINT = "Each bar is one lecture. Taller bars are longer lectures.";
+
+/** One bar per lecture, as tall as the lecture is long. A second way to pick a lecture with the
+    mouse; the list below is the keyboard and screen-reader control, so the bars are not tab stops. */
+function renderStrip(list) {
+  const secs = list.map((l) => l.duration_sec || 0);
+  const longest = Math.max(1, ...secs);
+  const shortest = Math.min(longest, ...secs);
+  // The shortest lecture is 40% tall and the longest 100%, so differences can be seen.
+  const height = (d) => (longest === shortest ? 100 : Math.round(40 + (60 * (d - shortest)) / (longest - shortest)));
+  const cap = $("c-strip-cap");
+  const label = (l) => [l.lecture_no != null ? `Lecture ${l.lecture_no}` : "Lecture", topic(l), duration(l.duration_sec)].filter(Boolean).join(" · ");
+  const rest = () => (cap.textContent = state.lecture ? label(state.lecture) : STRIP_HINT);
+  $("c-strip").replaceChildren(
+    ...list.map((l, i) => {
+      const selected = state.lecture?.entry_id === l.entry_id;
+      return el("button", {
+        type: "button",
+        tabindex: "-1",
+        class: `bar${selected ? " on" : ""}${l.indexed ? "" : " wait"}`,
+        style: `height:${height(l.duration_sec || 0)}%;animation-delay:${Math.min(i, 60) * 14}ms`,
+        on: { click: () => selectLecture(selected ? null : l), mouseenter: () => (cap.textContent = label(l)), mouseleave: rest },
+      });
+    })
+  );
+  rest();
 }
 
 function renderLectures() {
   const list = visibleLectures();
   const multi = sectionsOf(state.course.lectures).length > 0;
   $("l-count").textContent = `${list.length} lecture${list.length === 1 ? "" : "s"}`;
+  renderStrip(list);
+  keepFocus($("lecture-list"), ".lecture", () => drawLectures(list, multi));
+}
+
+function drawLectures(list, multi) {
   $("lecture-list").replaceChildren(
     ...list.map((l, i) => {
       const selected = state.lecture?.entry_id === l.entry_id;
@@ -223,7 +267,6 @@ function renderScope() {
   const l = state.lecture;
   if (!l) {
     $("scope").replaceChildren(
-      el("div", { class: "eyebrow" }, "Ask"),
       el("h2", { class: "scope-title" }, `Anything from all ${state.course.lectures.length} lectures.`),
       el("p", { class: "scope-sub" }, "Or pick a lecture to focus on just that one.")
     );
@@ -244,7 +287,7 @@ function renderScope() {
       "div",
       { class: "scope-meta" },
       el("span", {}, [day(l), duration(l.duration_sec)].filter(Boolean).join(" · ")),
-      url ? el("a", { class: "watch", href: url, target: "_blank", rel: "noopener noreferrer" }, "Watch ↗") : null
+      url ? el("a", { class: "watch", href: url, target: "_blank", rel: "noopener noreferrer" }, "Watch lecture ↗") : null
     )
   );
   $("q").placeholder = `Ask about ${topic(l)}`;
@@ -278,7 +321,7 @@ function showSources(sources) {
           url ? { class: "source-head", href: url, target: "_blank", rel: "noopener noreferrer" } : { class: "source-head" },
           el("span", { class: "time" }, s.timestamp),
           el("span", { class: "source-title" }, sourceLabel(s).replace(/, [\d:]+$/, "")),
-          url ? el("span", { class: "open" }, "Open ↗") : null
+          url ? el("span", { class: "open" }, "Play from here ↗") : null
         ),
         el("p", {}, `“${s.snippet}”`)
       );
@@ -405,6 +448,7 @@ async function start() {
     return;
   }
   setHealth("up", api.demo ? "Demo" : "Connected");
+  $("health").hidden = api.demo; // the "Demo data" badge already says it
   route();
 }
 
@@ -415,6 +459,26 @@ $("q").addEventListener("keydown", (e) => {
     $("ask").requestSubmit();
   }
 });
+// Keyboard: "/" jumps to the question box; arrows move through lectures and sections.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest?.("textarea, input, [contenteditable]") || $("course").hidden) return;
+  e.preventDefault();
+  $("q").focus();
+});
+function arrowKeys(container, selector, keys) {
+  container.addEventListener("keydown", (e) => {
+    const step = keys[e.key];
+    if (!step) return;
+    const items = [...container.querySelectorAll(selector)];
+    const at = items.indexOf(document.activeElement);
+    if (at < 0) return;
+    e.preventDefault();
+    items[Math.max(0, Math.min(items.length - 1, at + step))].focus();
+  });
+}
+arrowKeys($("lecture-list"), ".lecture", { ArrowDown: 1, ArrowUp: -1 });
+arrowKeys($("sections"), ".chip", { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 1, ArrowUp: -1 });
 $("q").addEventListener("input", () => {
   $("q").style.height = "auto";
   $("q").style.height = `${$("q").scrollHeight}px`;

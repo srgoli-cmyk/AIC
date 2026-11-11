@@ -1,0 +1,190 @@
+/* Sample looks, chosen with ?look=sky or ?look=midnight (app/look.js). Each uses two quiet colors
+   for almost everything and one highlight color only where the student acts or lands: the Ask
+   button, citations and the time a source opens at. Selection uses the quiet colors. */
+
+:root[data-look="sky"] {
+  --ground: #eaf4fd;
+  --surface: #ffffff;
+  --raised: #f1f8fe;
+  --line: #cfe3f5;
+  --ink: #0f2238;
+  --muted: #5a7189;
+  --body: #2c4259;
+  --edge: #5f7890;
+  --warn: #f5b93a;
+  --bad: #d8432a;
+  /* quiet 1: sky blue. quiet 2: white (the surfaces above). */
+  --panel: #bfe0fb;
+  --panel-ink: #0f2238;
+  --panel-muted: #3f5f7f;
+  --panel-chip: rgba(255, 255, 255, 0.62);
+  --quiet: #5aa9e6;
+  --select-bg: #e3f1fc;
+  --select-line: #bfe0fb;
+  /* highlight: hot pink */
+  --accent: #ff2e8b;
+  --accent-hover: #ff5aa5;
+  --accent-deep: #ffe9f3;
+  --accent-soft-hover: #ffd6e8;
+  --accent-line: #ffb3d4;
+  --accent-ink: #cf0a69;
+  --on-accent: #2b0018;
+  --accent-glow: rgba(255, 46, 139, 0.14);
+  --cta-edge: #a8054f;
+  color-scheme: light;
+}
+
+:root[data-look="midnight"] {
+  --ground: #05070f;
+  --surface: #0c1020;
+  --raised: #12182c;
+  --line: #1c2440;
+  --ink: #f3f5fb;
+  --muted: #8e97b3;
+  --body: #c5cbdd;
+  --edge: #7c87ad;
+  /* quiet 1: midnight black (ground and surfaces). quiet 2: electric blue. */
+  --panel: #2251ff;
+  --panel-ink: #ffffff;
+  --panel-muted: #dbe4ff;
+  --panel-chip: rgba(255, 255, 255, 0.14);
+  --quiet: #5c84ff;
+  --select-bg: #0f1a45;
+  --select-line: #2a45b0;
+  /* highlight: cantaloupe */
+  --accent: #ffa45c;
+  --accent-hover: #ffb97f;
+  --accent-deep: #2a1a0e;
+  --accent-soft-hover: #3a2412;
+  --accent-line: #6b4424;
+  --accent-ink: #ffa45c;
+  --on-accent: #1f1005;
+  --accent-glow: rgba(255, 164, 92, 0.16);
+  --cta-edge: #b5642a;
+  color-scheme: dark;
+}
+
+/* Shared structure for both looks */
+/* The original's glow becomes a plain strip that hides page content scrolling above the bar */
+:root[data-look] body::before {
+  left: 0; right: 0; top: 0; width: auto; height: 38px; margin: 0; border-radius: 0;
+  background: var(--ground); filter: none; opacity: 1; z-index: 10;
+}
+
+/* A floating bar that stays with you */
+:root[data-look] .top {
+  position: sticky; top: 14px; z-index: 20; margin: 14px 0 8px; padding: 10px 12px 10px 22px;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--line);
+}
+:root[data-look] .brand { font-size: 17px; }
+:root[data-look] .brand-dot { width: 11px; height: 11px; }
+:root[data-look] .health { background: var(--raised); padding: 7px 13px; }
+:root[data-look] .health[data-state="up"] i { background: var(--quiet); box-shadow: none; }
+:root[data-look] .mode { color: #1a1400; }
+:root[data-look] .ok { background: var(--quiet); }
+
+/* Headline in two tones: the statement in ink, the second beat in the quiet color */
+:root[data-look] .intro h1 { font-weight: 700; }
+:root[data-look] .intro .accent { color: var(--quiet); }
+
+/* Home cards */
+:root[data-look] .course-card { box-shadow: none; }
+:root[data-look] .course-card:hover { background: var(--raised); border-color: var(--quiet); }
+:root[data-look] .course-card:hover .card-arrow { color: var(--accent-ink); }
+
+/* The course header is one big panel in the second quiet color */
+:root[data-look] .course-head {
+  margin: 16px 0 24px; padding: 40px 44px 36px; border-radius: 36px;
+  background: var(--panel); color: var(--panel-ink);
+}
+:root[data-look] .course-head h1 { font-weight: 700; margin-top: 6px; }
+:root[data-look] .course-head .eyebrow,
+:root[data-look] .course-head .course-name,
+:root[data-look] .course-head .coverage,
+:root[data-look] .course-head .fact-k,
+:root[data-look] .course-head .sec,
+:root[data-look] .course-head .link { color: var(--panel-muted); }
+:root[data-look] .course-head .link { text-decoration-color: currentColor; }
+:root[data-look] .course-head .link:hover { color: var(--panel-ink); }
+:root[data-look] .facts li { background: var(--panel-chip); border-color: transparent; }
+:root[data-look] .sec i { border-color: var(--panel-muted); }
+:root[data-look] .sec.has { color: var(--panel-ink); }
+:root[data-look] .sec.has i { background: var(--panel-ink); border-color: var(--panel-ink); }
+
+/* Lecture list: big plain numerals, quiet selection */
+:root[data-look] .lectures { box-shadow: none; }
+:root[data-look] .chip { background: var(--raised); }
+:root[data-look] .chip:hover { border-color: var(--quiet); }
+:root[data-look] .chip[aria-checked="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+:root[data-look] .l-no {
+  background: none; width: 44px; font-family: var(--sans); font-size: 24px; font-weight: 700;
+  letter-spacing: -0.04em; color: var(--edge); font-variant-numeric: tabular-nums;
+}
+:root[data-look] .lecture.selected { background: var(--select-bg); border-color: var(--select-line); }
+:root[data-look] .lecture.selected .l-no { background: none; color: var(--quiet); }
+
+/* Ask: the one loud thing on the page */
+:root[data-look] .ask:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 6px var(--accent-glow); }
+:root[data-look] .cta { color: var(--on-accent); box-shadow: 0 3px 0 var(--cta-edge); transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.2s ease; }
+:root[data-look] .cta:hover { transform: translateY(-1px); box-shadow: 0 4px 0 var(--cta-edge); }
+:root[data-look] .cta:active { transform: translateY(3px); box-shadow: 0 0 0 var(--cta-edge); }
+:root[data-look] .cta:disabled { box-shadow: none; transform: none; }
+:root[data-look] .cta:disabled { background: var(--line); color: var(--muted); }
+:root[data-look] .watch { color: var(--ink); border-color: var(--line); }
+:root[data-look] .watch:hover { background: var(--raised); }
+
+/* Answers: citations and times carry the highlight */
+:root[data-look] .cite { color: var(--accent-ink); }
+:root[data-look] .cite:hover { background: var(--accent-soft-hover); }
+:root[data-look] .time { color: var(--on-accent); }
+:root[data-look] a.source-head:hover .open { color: var(--accent-ink); }
+:root[data-look] .sources li.flash { animation-name: flash-look; }
+:root[data-look] .skeleton i { background: linear-gradient(90deg, var(--raised), var(--line), var(--raised)); background-size: 200% 100%; }
+@keyframes flash-look { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-glow); } }
+
+/* Sample switcher (only shown when ?look is in the address) */
+.looks { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); }
+.looks a { padding: 5px 12px; border-radius: 999px; font-size: 13px; color: var(--muted); text-decoration: none; }
+.looks a:hover { color: var(--ink); }
+.looks a[aria-current="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
+
+@media (max-width: 820px) {
+  :root[data-look] .top { top: 8px; padding-left: 16px; }
+  :root[data-look] .course-head { padding: 26px 22px 24px; border-radius: 26px; }
+  .looks a { padding: 5px 8px; font-size: 12px; }
+  :root[data-look] .brand, :root[data-look] .mode { white-space: nowrap; }
+  :root[data-look] .brand { font-size: 15px; }
+  :root[data-look] .top-right { gap: 6px; }
+}
+
+/* One radius scale: 12 for small pieces, 20 for cards, 32 for the header panel */
+:root[data-look] .facts li, :root[data-look] .lecture, :root[data-look] .sources li, :root[data-look] .answer-body .katex-display { border-radius: 12px; }
+:root[data-look] .notice, :root[data-look] .course-card, :root[data-look] .lectures, :root[data-look] .answer, :root[data-look] .sources { border-radius: 20px; }
+:root[data-look] .course-head { border-radius: 32px; }
+:root[data-look] .ask { border-radius: 20px; }
+:root[data-look] .cta { border-radius: 12px; }
+:root[data-look] .time { border-radius: 6px; }
+
+/* Things do not fade in one by one. The lecture bars drawing in is the only entrance. */
+:root[data-look] .notice, :root[data-look] .intro h1, :root[data-look] .lede, :root[data-look] .course-card,
+:root[data-look] .course-head, :root[data-look] .lecture, :root[data-look] .scope, :root[data-look] .result { animation: none; }
+
+/* Lecture bars (only in the sample looks) */
+.strip-wrap { display: none; }
+:root[data-look] .strip-wrap { display: block; margin-top: 28px; }
+.strip { display: flex; align-items: flex-end; gap: 3px; height: 56px; }
+.bar {
+  flex: 1 1 0; min-width: 2px; max-width: 18px; padding: 0; border: 0; border-radius: 3px 3px 0 0; cursor: pointer;
+  background: var(--panel-ink); opacity: 0.28; transform-origin: bottom;
+  animation: grow 0.5s var(--ease) both; transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.bar:hover { opacity: 0.7; transform: scaleY(1.08); }
+.bar.on { opacity: 1; }
+.bar.wait { background: repeating-linear-gradient(0deg, var(--panel-ink) 0 3px, transparent 3px 6px); }
+.strip-cap { margin: 10px 0 0; min-height: 1.4em; font-family: var(--mono); font-size: 12px; color: var(--panel-muted); border-top: 1px solid var(--panel-chip); padding-top: 10px; }
+@keyframes grow { from { transform: scaleY(0); } }
+
+/* Keyboard hints under the question box */
+.keys { margin: 12px 4px 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.keys kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--surface); color: var(--ink); }
+@media (hover: none) { .keys { display: none; } }
