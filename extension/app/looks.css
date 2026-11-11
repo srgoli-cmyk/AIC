@@ -1,4 +1,4 @@
-/* Sample looks, chosen with ?look=sky or ?look=midnight (app/look.js). Each uses two quiet colors
+/* Looks. Sky is the default (data-look on <html>); ?look=midnight or ?look=original switch (app/look.js). Each uses two quiet colors
    for almost everything and one highlight color only where the student acts or lands: the Ask
    button, citations and the time a source opens at. Selection uses the quiet colors. */
 
@@ -142,7 +142,7 @@
 :root[data-look] .skeleton i { background: linear-gradient(90deg, var(--raised), var(--line), var(--raised)); background-size: 200% 100%; }
 @keyframes flash-look { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-glow); } }
 
-/* Sample switcher (only shown when ?look is in the address) */
+/* Look switcher (only shown when ?look is in the address) */
 .looks { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); }
 .looks a { padding: 5px 12px; border-radius: 999px; font-size: 13px; color: var(--muted); text-decoration: none; }
 .looks a:hover { color: var(--ink); }
@@ -169,7 +169,7 @@
 :root[data-look] .notice, :root[data-look] .intro h1, :root[data-look] .lede, :root[data-look] .course-card,
 :root[data-look] .course-head, :root[data-look] .lecture, :root[data-look] .scope, :root[data-look] .result { animation: none; }
 
-/* Lecture bars (only in the sample looks) */
+/* Lecture bars (not in the original look) */
 .strip-wrap { display: none; }
 :root[data-look] .strip-wrap { display: block; margin-top: 28px; }
 .strip { display: flex; align-items: flex-end; gap: 3px; height: 56px; }

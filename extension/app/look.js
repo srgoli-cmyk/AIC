@@ -1,15 +1,16 @@
-// Sample looks for the page: ?look=sky or ?look=midnight (styles in looks.css). Without ?look the
-// page is unchanged. With it, a small switcher in the top bar moves between the samples.
+// The page's look. Sky is the default (set on <html> in app.html, so there is no flash). ?look=midnight
+// or ?look=original shows another one, and then a small switcher in the top bar moves between them.
 const LOOKS = [
-  ["original", "Original"],
   ["sky", "Sky"],
   ["midnight", "Midnight"],
+  ["original", "Original"],
 ];
 
 const params = new URLSearchParams(location.search);
 export const look = LOOKS.some(([id]) => id === params.get("look")) ? params.get("look") : null;
 
-if (look && look !== "original") document.documentElement.dataset.look = look;
+if (look === "original") delete document.documentElement.dataset.look;
+else if (look) document.documentElement.dataset.look = look;
 
 if (look) {
   const bar = document.querySelector(".top-right");

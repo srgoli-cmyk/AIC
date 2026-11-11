@@ -4,37 +4,41 @@
     <meta charset="utf-8" />
     <link rel="stylesheet" href="vendor/fonts/fonts.css" />
     <style>
-      :root { --ground: #0c0c10; --surface: #16161c; --line: #24242d; --ink: #f2f1ec; --muted: #9a99a6; --accent: #c8f560; --bad: #f57a60; }
+      /* Sky: sky blue and white are the quiet colors, hot pink is only on the main action. */
+      :root { --ground: #eaf4fd; --surface: #ffffff; --line: #cfe3f5; --ink: #0f2238; --muted: #5a7189; --quiet: #5aa9e6; --accent: #ff2e8b; --accent-edge: #a8054f; --on-accent: #2b0018; --bad: #c2371f; color-scheme: light; }
       * { box-sizing: border-box; }
       body { margin: 0; width: 320px; padding: 18px; background: var(--ground); color: var(--ink); font: 14px/1.45 "Inter Tight", system-ui, sans-serif; }
       .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; margin-bottom: 14px; }
       .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
-      button, a.open { display: block; width: 100%; border: 0; border-radius: 999px; padding: 11px 16px; font-family: inherit; font-weight: 600; font-size: 14px; text-align: center; cursor: pointer; text-decoration: none; }
-      #sync-all { background: var(--accent); color: var(--ground); }
-      #sync-all:hover { background: #dbff85; }
-      button.secondary { margin-top: 8px; background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+      button, a.open { display: block; width: 100%; border: 0; border-radius: 12px; padding: 11px 16px; font-family: inherit; font-weight: 600; font-size: 14px; text-align: center; cursor: pointer; text-decoration: none; }
+      #sync-all { background: var(--accent); color: var(--on-accent); box-shadow: 0 3px 0 var(--accent-edge); margin-bottom: 3px; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+      #sync-all:hover { background: #ff5aa5; }
+      #sync-all:active { transform: translateY(3px); box-shadow: 0 0 0 var(--accent-edge); }
+      button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+      button.secondary { margin-top: 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
       button.secondary:hover { background: var(--surface); }
-      a.open { margin-top: 10px; background: transparent; color: var(--accent); border: 1px solid #3a4a1c; }
-      a.open:hover { background: #1b2013; }
-      #status { white-space: pre-wrap; margin: 12px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); color: #c9c8d0; min-height: 2.6em; font: 12px/1.55 "JetBrains Mono", ui-monospace, monospace; }
+      a.open { margin-top: 10px; background: var(--ink); color: var(--surface); border: 1px solid var(--ink); }
+      a.open:hover { background: #1c3552; }
+      #status { white-space: pre-wrap; margin: 12px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: #2c4259; min-height: 2.6em; font: 12px/1.55 "JetBrains Mono", ui-monospace, monospace; }
       details { margin-top: 14px; color: var(--muted); font-size: 12px; }
       summary { cursor: pointer; }
       #ping { margin-top: 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
       #out { white-space: pre-wrap; margin: 8px 0 0; font: 11px "JetBrains Mono", ui-monospace, monospace; color: var(--muted); }
-      .auto { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); }
+      .auto { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
       .auto-text { min-width: 0; }
       .auto-title { font-weight: 600; font-size: 13px; }
       #auto-line { color: var(--muted); font-size: 12px; margin-top: 2px; }
       .switch { position: relative; flex: none; width: 38px; height: 22px; }
       .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
       .track { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background 0.2s; pointer-events: none; }
-      .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 0.2s, background 0.2s; }
-      .switch input:checked + .track { background: #3a4a1c; }
-      .switch input:checked + .track::after { transform: translateX(16px); background: var(--accent); }
-      .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform 0.2s, background 0.2s; }
+      .switch input:checked + .track { background: var(--ink); }
+      .switch input:checked + .track::after { transform: translateX(16px); }
+      .switch input:focus-visible + .track { outline: 2px solid var(--ink); outline-offset: 2px; }
       .auto.paused #auto-line { color: var(--bad); }
-      @media (prefers-reduced-motion: reduce) { .track, .track::after { transition: none; } }
-      a.open.quiet { color: var(--muted); border-color: var(--line); font-weight: 500; }
+      @media (prefers-reduced-motion: reduce) { .track, .track::after, #sync-all { transition: none; } }
+      a.open.quiet { background: var(--surface); color: var(--ink); border-color: var(--line); font-weight: 500; }
+      a.open.quiet:hover { background: #f1f8fe; }
       .foot { margin: 12px 0 0; color: var(--muted); font-size: 11px; }
       .foot a { color: var(--muted); }
       [hidden] { display: none !important; }
