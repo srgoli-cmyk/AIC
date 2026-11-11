@@ -273,6 +273,17 @@ test("long lectures send an even sample, never more than the service accepts", (
   assert.deepEqual(spread([1, 2, 3], 20), [1, 2, 3]);
 });
 
+test("a study request stays under the service's size limit", async () => {
+  const sent = [];
+  const long = Array.from({ length: 90 }, (_, i) => ({ entry_id: A, lecture_title: "Lecture 1", lecture_no: 1, media_url: "https://podcast.ucsd.edu/watch/fa26/math018_004-000-le/1", start_sec: i * 60, end_sec: i * 60 + 55, text: "w ".repeat(1100) }));
+  await studyLecture("teach", { hits: async () => long, writeStudy: async (task, passages) => (sent.push(passages), { answer: `x [${passages[0].citation}]` }) });
+  assert.ok(sent[0].length <= 60 && sent[0].length >= 10);
+  assert.ok(JSON.stringify({ task: "teach", passages: sent[0] }).length < 80_000);
+  const short = long.slice(0, 50).map((h) => ({ ...h, text: "short text" }));
+  await studyLecture("teach", { hits: async () => short, writeStudy: async (task, passages) => (sent.push(passages), { answer: `x [${passages[0].citation}]` }) });
+  assert.equal(sent[1].length, 50, "a normal lecture is sent whole");
+});
+
 test("the study client sends the task and the excerpts, nothing else", async () => {
   const sent = [];
   const write = studyClient("u", { getInstallId: async () => "x", fetchFn: async (url, init) => (sent.push(JSON.parse(init.body)), { ok: true, status: 200, json: async () => ({ cards: [] }) }) });

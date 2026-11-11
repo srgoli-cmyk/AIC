@@ -1,10 +1,13 @@
 // Study tools for one lecture: a short lesson, flashcards and practice test questions. Like
-// answers, only caption excerpts leave the browser: up to MAX_PASSAGES of the lecture's chunks,
-// spread evenly from start to end, go to the answer service, which writes the study set.
+// answers, only caption excerpts leave the browser, but a study set needs the whole lecture: up to
+// MAX_PASSAGES of its chunks (all of a normal lecture, an even sample of a long one) go to the
+// answer service, which writes the study set.
 import { AnswerUnavailable, citationLabel, citedHits, NOTHING_INDEXED, toSource } from "./answer.js";
 
 export const STUDY_KINDS = ["teach", "flashcards", "quiz"];
-export const MAX_PASSAGES = 20;
+export const MAX_PASSAGES = 60;
+// The service refuses a body over 80 KB; stay well under it.
+const MAX_CHARS = 60_000;
 // The service refuses a passage over 2500 characters; chunks are far shorter, this is a guard.
 const MAX_TEXT = 2400;
 
@@ -36,7 +39,9 @@ export async function studyLecture(kind, { hits, writeStudy, random = Math.rando
   if (!STUDY_KINDS.includes(kind)) throw new Error("unknown study kind");
   const all = await hits();
   if (!all.length) return { empty: NOTHING_INDEXED };
-  const given = spread(all);
+  // Fewer passages if these are unusually long, so the request always fits.
+  let given = spread(all);
+  for (let n = MAX_PASSAGES - 10; n >= 10 && given.reduce((sum, h) => sum + Math.min(h.text.length, MAX_TEXT), 0) > MAX_CHARS; n -= 10) given = spread(all, n);
   const byLabel = new Map(given.map((h) => [citationLabel(h), h]));
   const reply = await writeStudy(
     kind,

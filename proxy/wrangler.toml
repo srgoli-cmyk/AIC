@@ -5,6 +5,9 @@ compatibility_date = "2026-10-01"
 
 [vars]
 OPENROUTER_MODEL = "openai/gpt-4o-mini"
+# Optional: a stronger model for the study tools only (lesson, flashcards, test questions).
+# Test questions are noticeably better with one. Costs more per request.
+# OPENROUTER_STUDY_MODEL = "openai/gpt-4o"
 # Set to the store extension's origin once it has an id, e.g. "chrome-extension://abcdefghijklmnopabcdefghijklmnop".
 # Empty allows any origin (fine for a first test, not for launch).
 ALLOWED_ORIGINS = ""

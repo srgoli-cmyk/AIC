@@ -12,12 +12,14 @@ const env = {};
 try {
   const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", ".env"), "utf8");
   for (const line of text.split("\n")) {
-    const m = /^\s*(OPENROUTER_API_KEY|OPENROUTER_MODEL)\s*=\s*(.*?)\s*$/.exec(line);
+    const m = /^\s*(OPENROUTER_API_KEY|OPENROUTER_MODEL|OPENROUTER_STUDY_MODEL)\s*=\s*(.*?)\s*$/.exec(line);
     if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 } catch {
   // No .env: answers report "not configured".
 }
+// For trying another study model once: OPENROUTER_STUDY_MODEL=... node proxy/dev.mjs
+if (process.env.OPENROUTER_STUDY_MODEL) env.OPENROUTER_STUDY_MODEL = process.env.OPENROUTER_STUDY_MODEL;
 if (!env.OPENROUTER_API_KEY) console.log("proxy-dev: no OPENROUTER_API_KEY in .env, answers will fail");
 
 const PORT = 8787;

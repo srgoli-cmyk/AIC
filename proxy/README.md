@@ -43,7 +43,8 @@ and deploy again. Requests from anywhere else get 403.
 ## Limits and cost
 
 - 20 questions per minute per install (`[[ratelimits]]`), keyed by a random install id.
-- Requests over 80 KB, more than 20 excerpts, or unknown fields get 422 before any model call.
+- Requests over 80 KB, more than 20 excerpts (60 for a study task), or unknown fields are refused before any model call.
+- A quiz makes two model calls: one writes the questions, one checks that each has exactly one right answer.
 - gpt-4o-mini with about 12 excerpts is roughly $0.0005 to $0.001 per question. Set a monthly credit
   limit on the OpenRouter key so a bug or abuse cannot run up a bill.
 

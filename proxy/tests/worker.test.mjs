@@ -2,7 +2,7 @@
 // only to OpenRouter. Synthetic data; no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildMessages, buildStudyMessages, handle, OPENROUTER_URL, parseRequest, parseStudy, TASKS } from "../src/worker.js";
+import { buildMessages, buildStudyMessages, checkedQuestions, handle, OPENROUTER_URL, parseRequest, parseStudy, repairJsonMath, TASKS } from "../src/worker.js";
 
 const ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 const body = { question: "What is a kernel?", passages: [{ citation: "Lecture 9, 1:02", text: "The kernel is..." }] };
@@ -132,6 +132,36 @@ test("a study request cannot carry a question or an unknown task", async () => {
     assert.equal((await handle(request(b), env(), m.fetchFn)).status, 422);
   }
   assert.equal((await handle(request({ task: "quiz", passages: body.passages }), env(), model("{}").fetchFn)).status, 502);
+  const many = (n) => Array.from({ length: n }, () => body.passages[0]);
+  assert.equal((await handle(request({ task: "teach", passages: many(60) }), env(), model("**T**").fetchFn)).status, 200, "a study task may send most of a lecture");
+  assert.equal((await handle(request({ task: "teach", passages: many(61) }), env(), m.fetchFn)).status, 422);
   assert.equal(m.calls.length, 0);
   assert.match(buildStudyMessages("teach", body.passages, () => "id0")[1].content, /END PASSAGES id0\n\nTeach me what this lecture covered\.$/);
+});
+
+test("LaTeX written with single backslashes survives the JSON reply", () => {
+  const raw = String.raw`{"cards":[{"front":"Differentiate $x^2 \times \sin x$","back":"$\frac{1}{\cos^2 x}$ and $\theta \neq 0$\nNext line","citation":"Lecture 9, 1:02"}]}`;
+  const out = parseStudy("flashcards", raw, body.passages);
+  assert.equal(out.cards[0].front, String.raw`Differentiate $x^2 \times \sin x$`);
+  assert.equal(out.cards[0].back, String.raw`$\frac{1}{\cos^2 x}$ and $\theta \neq 0$` + "\nNext line", "a real \\n stays a line break");
+  assert.equal(repairJsonMath(String.raw`"a \\frac b \" c \u00e9"`), String.raw`"a \\frac b \" c \u00e9"`, "already valid escapes are left alone");
+});
+
+test("a quiz is checked by a second pass that drops questions with two right answers", async () => {
+  const q = (n, answer = 0) => ({ question: `Q${n}?`, choices: ["a", "b", "c", "d"], answer, why: "w", citation: "Lecture 9, 1:02" });
+  const questions = [q(1), q(2), q(3), q(4, 2)];
+  assert.deepEqual(checkedQuestions(questions, JSON.stringify({ correct: [[0], [0, 1], [3], [2]] })).map((x) => x.question), ["Q1?", "Q4?"]);
+  assert.equal(checkedQuestions(questions, JSON.stringify({ correct: [[0]] })), null, "a check of the wrong length is not trusted");
+
+  const replies = [JSON.stringify({ questions }), JSON.stringify({ correct: [[0], [0, 1], [0], [2]] })];
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: replies[calls.length - 1] } }] }), { status: 200 });
+  };
+  const res = await handle(request({ task: "quiz", passages: body.passages }), env(), fetchFn);
+  assert.deepEqual((await res.json()).questions.map((x) => x.question), ["Q1?", "Q3?", "Q4?"]);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages[1].content, /Question 2: Q2\?\n0: a\n1: b/);
+  assert.doesNotMatch(calls[1].messages[1].content, /kernel/, "the check sees the questions, not the lecture");
 });

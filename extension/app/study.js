@@ -28,7 +28,7 @@ export const STUDY = {
   quiz: {
     tab: "Test me",
     title: (t) => `Test yourself on ${t}`,
-    blurb: "5 multiple-choice questions. Each one tells you why, and where the lecture says it.",
+    blurb: "A few multiple-choice questions. Each one tells you why, and where the lecture says it.",
     go: "Write my test",
     wait: "Writing your test questions",
     pick: "write test questions from it",
