@@ -567,6 +567,34 @@ class ChunkHit:
     distance: float  # cosine distance to the question; smaller is closer
 
 
+def lecture_chunks(entry_id: str) -> list[ChunkHit]:
+    """Every chunk of one lecture, in the order it was said. For the study tools, which read a
+    whole lecture instead of searching it; `distance` is 0 because nothing was searched."""
+    ensure_schema()
+    stmt = (
+        select(
+            Chunk.entry_id,
+            Lecture.title,
+            Lecture.lecture_no,
+            Lecture.media_url,
+            Chunk.start_sec,
+            Chunk.end_sec,
+            Chunk.text,
+        )
+        .join(Lecture, Lecture.entry_id == Chunk.entry_id)
+        .where(Chunk.entry_id == entry_id)
+        .order_by(Chunk.start_sec)
+    )
+    with Session(engine) as session:
+        return [ChunkHit(*row, 0.0) for row in session.execute(stmt).all()]
+
+
+def lecture_exists(entry_id: str) -> bool:
+    ensure_schema()
+    with Session(engine) as session:
+        return session.get(Lecture, entry_id) is not None
+
+
 def _version_at_least(version: str, major: int, minor: int) -> bool:
     try:
         parts = tuple(int(p) for p in version.split(".")[:2])

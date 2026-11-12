@@ -1,6 +1,7 @@
 """FastAPI app. Sync and courses are stored in Postgres (app/db.py); after a sync, captions are
 chunked and embedded in the background (app/ingest.py); /ask answers from the stored chunks
-(app/answer.py)."""
+(app/answer.py); /study writes a lesson, flashcards or practice problems from one lecture
+(app/study.py)."""
 
 import logging
 from collections.abc import AsyncIterator
@@ -14,14 +15,18 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, db, ingest
+from . import answer, db, ingest, study
 from .config import settings
 from .schemas import (
     AskRequest,
     AskResponse,
+    CardsResponse,
     CourseDetail,
     CourseSummary,
     LectureStatus,
+    LessonResponse,
+    PracticeResponse,
+    StudyRequest,
     SyncPayload,
     SyncResponse,
 )
@@ -165,6 +170,18 @@ def ask(req: AskRequest) -> AskResponse:
     if req.entry_id is None:
         return answer.answer_question(req.course_id, req.question, req.top_k)
     return answer.answer_question(req.course_id, req.question, req.top_k, entry_id=req.entry_id)
+
+
+@app.exception_handler(study.LectureNotIndexed)
+def lecture_not_indexed(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": "lecture not indexed"})
+
+
+@app.post("/study", response_model=LessonResponse | CardsResponse | PracticeResponse)
+def study_lecture(req: StudyRequest) -> LessonResponse | CardsResponse | PracticeResponse:
+    if not db.lecture_exists(req.entry_id):
+        raise HTTPException(status_code=404, detail="lecture not synced")
+    return study.study_lecture(req.entry_id, req.kind)
 
 
 # The search page (web/) at /app/, so the extension can link to a course on the same origin.

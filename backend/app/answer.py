@@ -144,22 +144,33 @@ def build_messages(question: str, hits: list[db.ChunkHit]) -> list[dict[str, str
 # --- the model call (the one place that talks to the network) ---
 
 
-def call_llm(messages: list[dict[str, str]]) -> str:
+def call_llm(
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int = MAX_TOKENS,
+    json_mode: bool = False,
+    model: str | None = None,
+    timeout: float = TIMEOUT_SEC,
+) -> str:
     """Send the chat to OpenRouter and return the reply text. Raises AnswerUnavailable for any
     failure; logs only the error type or HTTP status (and, on success, token count and latency).
-    One attempt, no retries."""
+    One attempt, no retries. The keyword options are for the study tools (app/study.py), whose
+    replies are longer and are JSON."""
     started = time.perf_counter()
+    payload = {
+        "model": model or settings.openrouter_model,
+        "messages": messages,
+        "temperature": TEMPERATURE,
+        "max_tokens": max_tokens,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     try:
         response = httpx.post(
             OPENROUTER_URL,
             headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
-            json={
-                "model": settings.openrouter_model,
-                "messages": messages,
-                "temperature": TEMPERATURE,
-                "max_tokens": MAX_TOKENS,
-            },
-            timeout=TIMEOUT_SEC,
+            json=payload,
+            timeout=timeout,
         )
     # UnicodeEncodeError: a key with non-ASCII characters cannot be sent as a header.
     except (httpx.HTTPError, UnicodeEncodeError) as exc:
@@ -320,7 +331,7 @@ def source_url(media_url: str, start_sec: float) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
-def _source(hit: db.ChunkHit) -> Source:
+def to_source(hit: db.ChunkHit) -> Source:
     return Source(
         lecture_title=hit.lecture_title,
         entry_id=hit.entry_id,
@@ -360,4 +371,4 @@ def answer_question(
     if not cited:
         # No valid citation: whatever the model wrote is not grounded in the passages.
         return AskResponse(answer=NOT_COVERED, sources=[])
-    return AskResponse(answer=cleaned.strip(), sources=[_source(h) for h in cited])
+    return AskResponse(answer=cleaned.strip(), sources=[to_source(h) for h in cited])

@@ -51,6 +51,16 @@ The database starts empty, and the repo has no course data, so you sync your own
      class yet.
 3. To keep a course up to date, turn on **Keep <course> updated** in the popup. It syncs once a day.
 4. Open http://localhost:8000/app/, pick a course and ask a question.
+5. To study one lecture, pick it from the list and use the tabs above the question box:
+   - **Teach me** writes a full lesson from that lecture, with the problems worked in class placed
+     inside it for you to try.
+   - **Flashcards** makes about 14 cards.
+   - **Practice** writes up to 10 multiple-choice problems, from warm-up to challenge, each with a
+     worked solution.
+
+   Each one takes up to a minute. They are written by the model in `OPENROUTER_MODEL`. Practice
+   problems come out better with a stronger model: set `OPENROUTER_STUDY_MODEL` in `.env` (for
+   example `openai/gpt-4o`) to use one for these three tools only. It costs more per use.
 
 A whole course takes a while, because lectures are read one at a time. Syncing again is safe.
 

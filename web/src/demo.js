@@ -138,3 +138,72 @@ export function demoAnswer(question, entryId) {
     sources: [],
   };
 }
+
+/** Synthetic study sets, in the shapes src/local/study.js returns. The same for every demo lecture. */
+export function demoStudy(kind) {
+  const [a, b] = SOURCES;
+  if (kind === "teach") {
+    return {
+      sections: [
+        {
+          title: "Why products need their own rule",
+          body:
+            "You might hope the derivative of a product is the product of the derivatives. It is not. Take $x \\cdot x = x^2$: its derivative is $2x$, but multiplying the two derivatives gives $1 \\cdot 1 = 1$.\n\n" +
+            "The reason is that **both factors change at once**. When $x$ moves a little, $f$ changes and $g$ changes, and each of those changes moves the product. A correct rule has to count both.",
+          source: a,
+          problems: [],
+        },
+        {
+          title: "The product rule",
+          body:
+            "Keep one factor, differentiate the other, then swap and add: $(fg)' = f'g + fg'$. Each term holds one factor still while the other changes.\n\n" +
+            "To use it, name the two factors first, write down each derivative on its own line, then put the four pieces into the rule. The **common mistake** is writing $f'g'$, which drops both of the terms that matter.",
+          source: a,
+          problems: [
+            {
+              question: "Differentiate $x^2 \\sin x$.",
+              steps: ["Name the factors: $f = x^2$ and $g = \\sin x$.", "Differentiate each one: $f' = 2x$ and $g' = \\cos x$.", "Put them into $f'g + fg'$: $2x \\cdot \\sin x + x^2 \\cdot \\cos x$."],
+              answer: "$2x\\sin x + x^2\\cos x$",
+              fromLecture: true,
+              source: b,
+            },
+          ],
+        },
+        {
+          title: "Telling a product from a composition",
+          body:
+            "The product rule is for two functions **multiplied**, like $x^2 \\sin x$. A composition is one function **inside** another, like $\\sin(x^2)$, and that needs the chain rule instead.\n\n" +
+            "Before you differentiate, ask what the last operation is. If the last thing you would do on a calculator is multiply, it is a product.",
+          source: SOURCES[2],
+          problems: [
+            {
+              question: "Differentiate $x^3 e^x$.",
+              steps: ["The last operation is a multiplication, so this is a product: $f = x^3$, $g = e^x$.", "$f' = 3x^2$ and $g' = e^x$.", "$f'g + fg' = 3x^2 e^x + x^3 e^x$."],
+              answer: "$x^2 e^x (3 + x)$",
+              fromLecture: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+      check: ["Why does $f'g'$ give the wrong answer for $x \\cdot x$?", "Is $\\sin x \\cos x$ a product or a composition? Which rule does it need?"],
+    };
+  }
+  if (kind === "flashcards") {
+    return {
+      cards: [
+        { front: "What is the product rule?", back: "$(fg)' = f'g + fg'$. Differentiate one factor at a time and keep the other.", source: a },
+        { front: "What is the common mistake with products?", back: "Writing $f'g'$. The derivative of a product is not the product of the derivatives.", source: a },
+        { front: "Derivative of $x^2 \\sin x$", back: "$2x\\sin x + x^2\\cos x$", source: b },
+        { front: "When do you use the chain rule instead?", back: "For a composition like $\\sin(x^2)$, where one function sits inside another.", source: null },
+      ],
+    };
+  }
+  return {
+    questions: [
+      { question: "What is $(fg)'$?", choices: ["$f'g'$", "$f'g + fg'$", "$f'g - fg'$", "$fg'$"], answer: 1, level: 1, why: "Each factor is differentiated once while the other is kept, and the two results are added.", source: a },
+      { question: "What is the derivative of $x^2 \\sin x$?", choices: ["$2x\\cos x$", "$x^2\\cos x$", "$2x\\sin x + x^2\\cos x$", "$2x\\sin x - x^2\\cos x$"], answer: 2, level: 2, why: "With $f = x^2$ and $g = \\sin x$: $f' = 2x$ and $g' = \\cos x$. Then $f'g + fg' = 2x\\sin x + x^2\\cos x$.", source: b },
+      { question: "Which of these needs the chain rule, not the product rule?", choices: ["$x \\sin x$", "$x^2 e^x$", "$\\sin x \\cos x$", "$\\sin(x^2)$"], answer: 3, level: 3, why: "It is a composition: $x^2$ sits inside the sine. The others are products of two functions.", source: null },
+    ],
+  };
+}

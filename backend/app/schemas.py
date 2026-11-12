@@ -147,5 +147,54 @@ class AskResponse(BaseModel):
     sources: list[Source]
 
 
+class StudyRequest(_Strict):
+    entry_id: str = Field(pattern=r"^[0-9]_[a-z0-9]{8}$")
+    kind: Literal["teach", "flashcards", "quiz"]
+
+
+class LessonProblem(BaseModel):
+    question: str
+    steps: list[str]
+    answer: str
+    # True only when the lecture works this problem; `source` is then where.
+    from_lecture: bool
+    source: Source | None
+
+
+class LessonSection(BaseModel):
+    title: str
+    body: str
+    source: Source | None
+    problems: list[LessonProblem]
+
+
+class LessonResponse(BaseModel):
+    sections: list[LessonSection]
+    check: list[str]
+
+
+class Card(BaseModel):
+    front: str
+    back: str
+    source: Source | None
+
+
+class CardsResponse(BaseModel):
+    cards: list[Card]
+
+
+class PracticeQuestion(BaseModel):
+    question: str
+    choices: list[str]
+    answer: int
+    why: str
+    level: int
+    source: Source | None
+
+
+class PracticeResponse(BaseModel):
+    questions: list[PracticeQuestion]
+
+
 def course_id_for(canvas_course_id: int) -> str:
     return f"canvas-{canvas_course_id}"

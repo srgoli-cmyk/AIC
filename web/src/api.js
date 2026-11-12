@@ -1,5 +1,5 @@
 // Calls to the FastAPI backend (contracts/api.md). Errors carry a message that is safe to show.
-import { DEMO_COURSES, demoAnswer, demoCourse } from "./demo.js";
+import { DEMO_COURSES, demoAnswer, demoCourse, demoStudy } from "./demo.js";
 
 const params = new URLSearchParams(location.search);
 // Served by the backend at /app/: same origin. Served on its own (`make web`): the default port.
@@ -85,4 +85,30 @@ export async function ask(courseId, question, entryId) {
     throw new BackendError("The backend sent an answer this page cannot read.");
   }
   return res;
+}
+
+/**
+ * A lesson ("teach"), flashcards or practice problems ("quiz") written from one lecture
+ * (POST /study). `{ empty: true }` when the lecture has nothing indexed yet.
+ */
+export async function study(entryId, kind) {
+  if (demo) {
+    await pause(1200);
+    return demoStudy(kind);
+  }
+  let res;
+  try {
+    // A lesson is a long reply, and practice problems are written and then checked.
+    res = await call("/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry_id: entryId, kind }) }, 150000);
+  } catch (err) {
+    if (err.message === "lecture not indexed") return { empty: true };
+    throw err;
+  }
+  const list = kind === "teach" ? res?.sections : kind === "flashcards" ? res?.cards : res?.questions;
+  if (!Array.isArray(list) || !list.length) throw new BackendError("The backend sent a study set this page cannot read.");
+  if (kind !== "teach") return res;
+  return {
+    sections: res.sections.map((x) => ({ ...x, problems: (x.problems || []).map((q) => ({ ...q, steps: q.steps || [], fromLecture: q.from_lecture === true })) })),
+    check: Array.isArray(res.check) ? res.check : [],
+  };
 }

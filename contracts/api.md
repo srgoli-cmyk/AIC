@@ -76,6 +76,35 @@ Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.
 - `404`: the course is not synced. A synced course with nothing indexed yet returns `200` with an answer saying so and empty `sources`, once a key is configured.
 
+## POST /study
+A lesson, flashcards or practice problems written from one lecture's captions.
+
+Body:
+```json
+{"entry_id": "1_fake0001", "kind": "teach"}
+```
+`kind` is `"teach"`, `"flashcards"` or `"quiz"`. The whole lecture is read (up to 60 chunks, an even sample of a longer one). Every `source` below has the same shape as in `/ask`, or is `null`.
+
+Response `200` for `"teach"`:
+```json
+{"sections": [{"title": "The product rule", "body": "Keep one factor...", "source": {},
+   "problems": [{"question": "Differentiate $x^2 \\sin x$.", "steps": ["..."], "answer": "$2x\\sin x + x^2\\cos x$", "from_lecture": true, "source": {}}]}],
+ "check": ["..."]}
+```
+- `body`, `question`, `steps`, `answer` and `check` are Markdown with LaTeX, with the same rendering rule as `answer` in `/ask`.
+- `problems` are the examples the lecture works, placed in the section they belong to. `from_lecture` is `true` only when the problem points at a real passage (`source` is then where it is worked). When the lecture works fewer than three, the model adds its own with `from_lecture: false` and `source: null`; a client must label those as not from the lecture.
+
+Response `200` for `"flashcards"`: `{"cards": [{"front": "...", "back": "...", "source": {}}]}`, up to 20.
+
+Response `200` for `"quiz"`: `{"questions": [{"question": "...", "choices": ["...", "...", "...", "..."], "answer": 2, "why": "...", "level": 1, "source": {}}]}`, up to 10.
+- `answer` is the position of the correct choice, 0 to 3. The choices are already in mixed order.
+- `level` is 1 (a rule), 2 (work a problem) or 3 (several steps). `why` is the worked solution.
+- A second model call works each question out and drops any it sees more than one right answer for. If that check fails or leaves fewer than four, the unchecked questions are returned.
+
+A reply from the model that cannot be read is asked for once more before the request fails with `502`.
+
+`404 {"detail": "lecture not synced"}`: the lecture is unknown. `409 {"detail": "lecture not indexed"}`: it has no chunks yet. The `503` and `502` answer-service errors below also apply. `OPENROUTER_STUDY_MODEL` (optional) picks a different model for this endpoint only.
+
 ## Errors
 All errors use FastAPI's default shape: `{"detail": ...}`.
 - `503 {"detail": "database unavailable"}`: the database cannot be reached.

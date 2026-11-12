@@ -17,6 +17,9 @@ class Settings:
     )
     openrouter_api_key: str = field(default=os.getenv("OPENROUTER_API_KEY", ""), repr=False)
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    # Optional: a stronger model for the study tools only (lessons, flashcards, practice
+    # problems). Empty uses openrouter_model.
+    openrouter_study_model: str = os.getenv("OPENROUTER_STUDY_MODEL", "")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     embedding_dim: int = int(os.getenv("EMBEDDING_DIM", "384"))
     cors_origin_regex: str = os.getenv(
