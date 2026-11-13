@@ -94,6 +94,9 @@ Response `200`: `{"doc_id": "canvas-file-7", "pages": 24, "chunks": 26, "status"
 - `name` is shown without its extension and without square brackets. `url` is built by the backend from the two ids, never taken from the request.
 - `404`: the course is not synced. `413`: over 40 MB. `422 {"detail": "file could not be read"}`: not a PDF or PowerPoint, or it has no text (scanned pages). `422` also when the file id belongs to another course.
 
+### DELETE /courses/{course_id}/documents/canvas/{canvas_file_id}
+Removes one Canvas document and its pages. The extension calls it for an older copy of a deck when a newer one is posted (`Week 3.pdf` and `Week 3_1015.pdf`: the most recently modified is kept). Response `204`. `404`: the course has no such document (another course's document is never touched). `422`: invalid file id.
+
 ### Slides in /ask
 A page of a document is cited as `[Slides: <name>, p. <page>]`. Its entry in `sources` has `"kind": "slides"`, `"page"`, `"timestamp": "p. <page>"`, `lecture_title` = the document's name, `entry_id` = its `doc_id`, `start_sec` = `end_sec` = the page number, and `url` = the file's page on Canvas. Lecture sources have `"kind": "lecture"` and `"page": null`. A question about one lecture (`entry_id` in the request) does not search slides.
 

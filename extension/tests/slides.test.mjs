@@ -2,7 +2,7 @@
 // Synthetic data; fetch is faked.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fetchModuleFiles, isSlideFile, mergeFiles, slidesNote, syncSlides, versionOf } from "../src/slides.js";
+import { deckKey, fetchModuleFiles, isSlideFile, latestRevisions, mergeFiles, slideRank, slidesNote, syncSlides, versionOf } from "../src/slides.js";
 import { MAX_SLIDE_BYTES, MAX_SLIDE_FILES } from "../src/config.js";
 
 const COURSE = 12345;
@@ -25,6 +25,7 @@ function res(body, { status = 200, url, headers = {} } = {}) {
 function world(o = {}) {
   const calls = [];
   const puts = [];
+  const deletes = [];
   const fetch = async (url, init = {}) => {
     const u = new URL(url);
     calls.push({ url, init });
@@ -32,6 +33,10 @@ function world(o = {}) {
       if (u.pathname === "/openapi.json") return res({ info: { title: o.title ?? "AI Lecture Search" } });
       if (u.pathname === `/courses/canvas-${COURSE}/documents` && !init.method) return o.documentsStatus ? res("", { status: o.documentsStatus }) : res(o.stored ?? []);
       const m = /\/documents\/canvas\/(\d+)$/.exec(u.pathname);
+      if (m && init.method === "DELETE") {
+        deletes.push(Number(m[1]));
+        return res("", { status: 204 });
+      }
       if (m && init.method === "PUT") {
         puts.push({ id: Number(m[1]), name: u.searchParams.get("name"), version: u.searchParams.get("version"), bytes: init.body.byteLength, credentials: init.credentials });
         return res({ status: "stored" }, { status: o.putStatus?.[m[1]] ?? 200 });
@@ -51,7 +56,7 @@ function world(o = {}) {
     if (s) return res(o.body?.[s[1]] ?? "%PDF-1.4 fake", { url: o.finalUrl?.[s[1]] ?? url, headers: o.downloadHeaders?.[s[1]] ?? {} });
     return res("", { status: 404 });
   };
-  return { fetch, calls, puts };
+  return { fetch, calls, puts, deletes };
 }
 
 const run = (w, files, report) => syncSlides({ fetchFn: w.fetch, backendUrl: BACKEND, courseId: COURSE, files, report });
@@ -77,7 +82,7 @@ test("new files are downloaded with the login and sent to the backend without it
   const w = world();
   const seen = [];
   const out = await run(w, [file(1), file(2, "Deck.pptx"), { id: 3, display_name: "hw.docx" }], (s) => seen.push(s));
-  assert.deepEqual(out, { found: 2, sent: 2, unchanged: 0, failed: 0, unreadable: 0, later: 0 });
+  assert.deepEqual(out, { found: 2, sent: 2, unchanged: 0, failed: 0, unreadable: 0, later: 0, older: 0 });
   assert.deepEqual(w.puts, [
     { id: 1, name: "Week 1.pdf", version: "1001:2026-10-01T00:00:00Z", bytes: 13, credentials: "omit" },
     { id: 2, name: "Deck.pptx", version: "1002:2026-10-01T00:00:00Z", bytes: 13, credentials: "omit" },
@@ -169,4 +174,49 @@ test("the popup line says what happened, and nothing when there are no slides", 
     slidesNote({ found: 9, sent: 3, unchanged: 2, unreadable: 1, failed: 2, later: 1 }),
     "Slides: 9 PDF and PowerPoint files (3 new, 2 already synced, 1 with no readable text, 2 could not be downloaded, 1 left for the next sync).",
   );
+});
+
+test("copies and revisions of a deck share one name", () => {
+  const same = ["18_Chapter1_Fall2026.pdf", "18_Chapter1_Fall2026_1015.pdf", "18_Chapter1_Fall2026 (1).pdf", "18_Chapter1_Fall2026_v2.PDF", "18_Chapter1_Fall2026 copy.pdf"];
+  assert.equal(new Set(same.map(deckKey)).size, 1);
+  for (const [a, b] of [
+    ["Lecture_1_MATH_18_Section_002_Fall_2026.pdf", "Lecture_1_MATH_18_Section_001_Fall_2026.pdf"],
+    ["Lecture_1.pdf", "Lecture_11.pdf"],
+    ["Notes_Fall_2026.pdf", "Notes_Fall.pdf"], // a year is not a date suffix
+    ["Week_1.pdf", "Week_1_1340.pdf"], // no month 13
+  ]) assert.notEqual(deckKey(a), deckKey(b), `${a} vs ${b}`);
+});
+
+test("the most recently modified copy of a deck is kept", () => {
+  const files = [
+    file(1, "Ch1.pdf", { modified_at: "2026-09-20T00:00:00Z" }),
+    file(2, "Ch1_1015.pdf", { modified_at: "2026-10-15T00:00:00Z" }),
+    file(3, "Ch2.pdf"),
+  ];
+  const { kept, older } = latestRevisions(files);
+  assert.deepEqual(kept.map((f) => f.id), [2, 3]);
+  assert.deepEqual(older, [1]);
+});
+
+test("lecture slides go before worksheets, and exams and solutions go last", () => {
+  const rank = (name) => slideRank({ display_name: name });
+  assert.equal(rank("Lecture_12_MATH_18.pdf"), 0);
+  assert.equal(rank("18_Chapter4_Fall2026.pdf"), 0);
+  assert.equal(rank("18WSFall2026_Week3.pdf"), 1);
+  for (const n of ["FinalSolns_Fall2025.pdf", "18_Midterm1A_Fall2026_solns.pdf", "18_Syllabus_Fall2026.pdf", "Week3_solutions.pdf"]) assert.equal(rank(n), 2, n);
+});
+
+test("only the newest copy is sent, an older copy the backend holds is removed, and lectures go first", async () => {
+  const w = world({ stored: [{ doc_id: "canvas-file-1", version: "old" }] });
+  const files = [
+    file(4, "FinalSolns_2025.pdf", { modified_at: "2026-11-01T00:00:00Z" }),
+    file(1, "Ch1.pdf", { modified_at: "2026-09-20T00:00:00Z" }),
+    file(2, "Ch1_1015.pdf", { modified_at: "2026-10-15T00:00:00Z" }),
+    file(3, "Lecture 3.pdf"),
+  ];
+  const out = await run(w, files);
+  assert.deepEqual(w.deletes, [1]);
+  assert.deepEqual(w.puts.map((p) => p.id), [2, 3, 4]);
+  assert.equal(out.older, 1);
+  assert.match(slidesNote(out), /1 older copy skipped/);
 });

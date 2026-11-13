@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -68,7 +68,7 @@ app = FastAPI(title="AI Lecture Search", version="0.0.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=settings.cors_origin_regex,
-    allow_methods=["GET", "POST", "PUT"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -206,6 +206,17 @@ async def put_canvas_document(
     return await run_in_threadpool(
         _store_canvas_document, course_id, canvas_file_id, name, version, bytes(data), background
     )
+
+
+@app.delete("/courses/{course_id}/documents/canvas/{canvas_file_id}", status_code=204)
+def delete_canvas_document(course_id: str, canvas_file_id: int) -> Response:
+    """Drop a Canvas file the extension found a newer copy of (`Week 3_1015.pdf` replacing
+    `Week 3.pdf`), so an old revision is not searched next to the new one."""
+    if canvas_file_id < 1 or canvas_file_id > 2**53:
+        raise HTTPException(status_code=422, detail="invalid file id")
+    if not db.delete_document(course_id, f"canvas-file-{canvas_file_id}"):
+        raise HTTPException(status_code=404, detail="document not found")
+    return Response(status_code=204)
 
 
 def _store_canvas_document(

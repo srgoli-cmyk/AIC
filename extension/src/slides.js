@@ -21,6 +21,44 @@ export function versionOf(file) {
   return `${Number.isFinite(file.size) ? file.size : "?"}:${typeof file.modified_at === "string" ? file.modified_at : "?"}`.slice(0, 100);
 }
 
+// A deck posted again: "Week 3 (1).pdf", "Week 3_1015.pdf" (a month and day), "Week 3_v2.pdf",
+// "Week 3 copy.pdf". A four-digit year such as "_2026" is not a date suffix (no month 20).
+const COPY_SUFFIX = [/\s*\(\d{1,2}\)$/, /[ _-](?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$/, /[ _-]v\d{1,2}$/, /[ _-]copy$/];
+
+/** The name a deck goes by once copy and revision suffixes are taken off. */
+export function deckKey(name) {
+  let key = String(name).toLowerCase().replace(/\.(pdf|pptx)$/, "").trim();
+  for (;;) {
+    const next = COPY_SUFFIX.reduce((k, re) => k.replace(re, ""), key).trim();
+    if (next === key) return key;
+    key = next;
+  }
+}
+
+const newer = (a, b) => (Date.parse(a.modified_at ?? "") || 0) - (Date.parse(b.modified_at ?? "") || 0) || a.id - b.id;
+
+/** One file per deck, the most recently modified; the ids of the older copies are returned too. */
+export function latestRevisions(files) {
+  const best = new Map();
+  for (const f of files) {
+    const key = deckKey(f.display_name);
+    const held = best.get(key);
+    if (!held || newer(f, held) > 0) best.set(key, f);
+  }
+  const kept = new Set([...best.values()].map((f) => f.id));
+  return { kept: files.filter((f) => kept.has(f.id)), older: files.filter((f) => !kept.has(f.id)).map((f) => f.id) };
+}
+
+// Lecture slides and notes are sent first; exams, solutions and the syllabus last, so a course
+// with more files than one sync takes still gets its lectures in the first one.
+const FIRST = /\b(lec(ture)?s?|slides?|notes?|chapter|ch)[\s_\-.]*\d|lecture|slides|chapter/i;
+const LAST = /exam|final|midterm|soln|solution|answer|key\b|quiz|syllabus|practice/i;
+export function slideRank(file) {
+  const name = file.display_name.replace(/_/g, " ");
+  if (LAST.test(name)) return 2;
+  return FIRST.test(name) ? 0 : 1;
+}
+
 function fileFields(f) {
   const name = clipText(f?.display_name, 300);
   if (!Number.isSafeInteger(f?.id) || f.id < 1 || !name) return null;
@@ -125,9 +163,11 @@ async function storedVersions(fetchFn, base, courseId) {
  * extra, and a failure here must not fail the lecture sync that already succeeded.
  */
 export async function syncSlides({ fetchFn, backendUrl, courseId, files, report = () => {} }) {
-  const out = { found: 0, sent: 0, unchanged: 0, failed: 0, unreadable: 0, later: 0 };
-  const slides = files.filter(isSlideFile);
-  out.found = slides.length;
+  const out = { found: 0, sent: 0, unchanged: 0, failed: 0, unreadable: 0, later: 0, older: 0 };
+  const all = files.filter(isSlideFile);
+  out.found = all.length;
+  const { kept: slides, older } = latestRevisions(all);
+  out.older = older.length;
   if (!slides.length) return out;
   let stored;
   try {
@@ -137,7 +177,21 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
     out.failed = slides.length;
     return out;
   }
-  const todo = slides.filter((f) => stored.get(`canvas-file-${f.id}`) !== versionOf(f));
+  // An older copy the backend still holds is dropped, so it is not searched next to the new one.
+  for (const id of older.filter((id) => stored.has(`canvas-file-${id}`))) {
+    try {
+      await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${id}`, {
+        method: "DELETE",
+        credentials: "omit",
+        signal: timeoutSignal(FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      // Left for the next sync.
+    }
+  }
+  const todo = slides
+    .filter((f) => stored.get(`canvas-file-${f.id}`) !== versionOf(f))
+    .sort((a, b) => slideRank(a) - slideRank(b) || (Date.parse(b.modified_at ?? "") || 0) - (Date.parse(a.modified_at ?? "") || 0));
   out.unchanged = slides.length - todo.length;
   out.later = Math.max(0, todo.length - MAX_SLIDE_FILES);
   const now = todo.slice(0, MAX_SLIDE_FILES);
@@ -177,5 +231,6 @@ export function slidesNote(r) {
   if (r.unreadable) parts.push(`${r.unreadable} with no readable text`);
   if (r.failed) parts.push(`${r.failed} could not be downloaded`);
   if (r.later) parts.push(`${r.later} left for the next sync`);
+  if (r.older) parts.push(`${r.older} older ${r.older === 1 ? "copy" : "copies"} skipped`);
   return `Slides: ${r.found} PDF and PowerPoint files (${parts.join(", ")}).`;
 }

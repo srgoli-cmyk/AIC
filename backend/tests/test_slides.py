@@ -277,6 +277,21 @@ def test_a_file_id_stored_for_one_course_cannot_be_taken_by_another(course):
 
 
 @pytest.mark.integration
+def test_an_older_copy_can_be_removed_but_not_another_courses(course):
+    other = json.loads(json.dumps(SAMPLE))
+    other["course"]["canvas_course_id"] = 888888
+    other["lectures"] = []
+    assert client.post("/sync", json=other).status_code == 200
+    _put(make_pdf([RULE]))
+    assert client.delete("/courses/canvas-888888/documents/canvas/7").status_code == 404
+    assert client.delete(f"/courses/{CID}/documents/canvas/7").status_code == 204
+    assert client.get(f"/courses/{CID}/documents").json() == []
+    assert db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5) == []
+    assert client.delete(f"/courses/{CID}/documents/canvas/7").status_code == 404
+    assert client.delete(f"/courses/{CID}/documents/canvas/0").status_code == 422
+
+
+@pytest.mark.integration
 def test_deleting_the_course_deletes_its_documents(course):
     _put(make_pdf([RULE]))
     with db.engine.begin() as conn:

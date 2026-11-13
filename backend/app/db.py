@@ -643,6 +643,17 @@ def save_document(
         raise ValueRejected from None
 
 
+def delete_document(course_id: str, doc_id: str) -> bool:
+    """Remove one of the course's documents and its chunks. False if the course has no such
+    document (another course's document is never touched)."""
+    ensure_schema()
+    with Session(engine) as session, session.begin():
+        gone = session.execute(
+            delete(Document).where(Document.doc_id == doc_id, Document.course_id == course_id)
+        ).rowcount
+    return bool(gone)
+
+
 def list_documents(course_id: str) -> list[DocumentInfo]:
     """The course's documents, by name. `indexed` is true when every chunk has its embedding."""
     ensure_schema()
