@@ -91,7 +91,7 @@ Response `200`, ordered by name:
 The body is the file itself (raw bytes, at most 40 MB). Only a real PDF or `.pptx` is read, judged by its first bytes, not by its name or `Content-Type`. Sending the same file id again replaces its pages.
 
 Response `200`: `{"doc_id": "canvas-file-7", "pages": 24, "chunks": 26, "status": "stored"}`.
-- `name` is shown without its extension and without square brackets. `url` is built by the backend from the two ids, never taken from the request.
+- `name` is shown without its extension (all of them: `Oct12.pdf.pdf` is `Oct12`), without a download copy number (`Week 3 (1).pdf` is `Week 3`) and without square brackets. Names stored before a rule changed are tidied when the backend starts. `url` is built by the backend from the two ids, never taken from the request.
 - `404`: the course is not synced. `413`: over 40 MB. `422 {"detail": "file could not be read"}`: not a PDF or PowerPoint, or it has no text (scanned pages). `422` also when the file id belongs to another course.
 
 ### DELETE /courses/{course_id}/documents/canvas/{canvas_file_id}
@@ -127,7 +127,7 @@ Body:
 ```json
 {"entry_id": "1_fake0001", "kind": "teach"}
 ```
-`kind` is `"teach"`, `"flashcards"` or `"quiz"`. The whole lecture is read (up to 60 chunks, an even sample of a longer one). Every `source` below has the same shape as in `/ask`, or is `null`.
+`kind` is `"teach"`, `"flashcards"` or `"quiz"`. The whole lecture is read (up to 60 chunks, an even sample of a longer one), together with the pages of the course's slides that match what the lecture says (chosen by the words used, preferring decks that name the lecture's section, never exams or solutions). Every `source` below has the same shape as in `/ask` (a lecture moment or a slide page), or is `null`.
 
 Response `200` for `"teach"`:
 ```json
@@ -136,7 +136,7 @@ Response `200` for `"teach"`:
  "check": ["..."]}
 ```
 - `body`, `question`, `steps`, `answer` and `check` are Markdown with LaTeX, with the same rendering rule as `answer` in `/ask`.
-- `problems` are the examples the lecture works, placed in the section they belong to. `from_lecture` is `true` only when the problem points at a real passage (`source` is then where it is worked). When the lecture works fewer than three, the model adds its own with `from_lecture: false` and `source: null`; a client must label those as not from the lecture.
+- `problems` are the examples the lecture and its slides work, placed in the section they belong to. Each states every number it needs. A second model (`OPENROUTER_CHECK_MODEL`) works each one again; its steps and answer replace the first ones, and a problem it cannot solve from what it states is dropped. `from_lecture` is `true` only when the problem points at a real passage (`source` is then where it is worked). When the lecture works fewer than three, the model adds its own with `from_lecture: false` and `source: null`; a client must label those as not from the lecture.
 
 Response `200` for `"flashcards"`: `{"cards": [{"front": "...", "back": "...", "source": {}}]}`, up to 20.
 

@@ -71,7 +71,7 @@ export function afterFailure(prev, code, now) {
 /** Text and color for the toolbar badge: "!" when a login is needed, else new lectures. */
 export function badge(all) {
   const list = Object.values(all || {}).filter((c) => c?.on === true);
-  if (list.some((c) => c.loginNeeded)) return { text: "!", color: "#f57a60" };
+  if (list.some((c) => c.loginNeeded)) return { text: "!", color: "#d8432a" };
   const n = list.reduce((s, c) => s + (c.unseen | 0), 0);
-  return { text: n > 0 ? (n > 99 ? "99+" : `+${n}`) : "", color: "#c8f560" };
+  return { text: n > 0 ? (n > 99 ? "99+" : `+${n}`) : "", color: "#f58bb4" };
 }

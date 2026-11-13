@@ -166,3 +166,48 @@ def test_other_web_pages_cannot_start_a_search_or_delete(course, monkeypatch):
     assert client.post(f"/courses/{CID}/site/search", headers=ext).status_code == 200
     local = {"Origin": "http://localhost:8000"}
     assert client.post(f"/courses/{CID}/site/search", headers=local).status_code == 200
+
+
+@pytest.mark.integration
+def test_a_sync_stops_when_the_site_is_forgotten_and_leaves_nothing(course, monkeypatch):
+    monkeypatch.setattr(cs, "check_site", lambda facts, url: verdict(url, cs.ACCEPT))
+
+    def forgotten_midway(course_id, url, progress=None):
+        db.delete_site(course_id)
+        db.save_document(
+            course_id,
+            cs.doc_id_for(url + "late.pdf"),
+            source="web",
+            name="Late",
+            url=url + "late.pdf",
+            version="v1",
+            content_hash="h",
+            pages=1,
+            chunks=[(1, "Stored just after the forget.")],
+        )
+        progress(cs.SiteSync(found=1))
+        raise AssertionError("progress should have stopped the sync")
+
+    monkeypatch.setattr(cs, "sync_site", forgotten_midway)
+    client.put(f"/courses/{CID}/site", json={"url": SITE})
+    assert client.get(f"/courses/{CID}/site").json() is None
+    assert client.get(f"/courses/{CID}/documents").json() == []
+
+
+@pytest.mark.integration
+def test_a_site_chosen_during_a_sync_is_read_after_it(course, monkeypatch):
+    monkeypatch.setattr(cs, "check_site", lambda facts, url: verdict(url, cs.ACCEPT))
+    read = []
+
+    def switch_midway(course_id, url, progress=None):
+        read.append(url)
+        if url == SITE:
+            db.set_site(course_id, OLD, "Old", "student")  # the student picks another meanwhile
+        progress(cs.SiteSync(found=1))
+        return cs.SiteSync(found=1, stored=1)
+
+    monkeypatch.setattr(cs, "sync_site", switch_midway)
+    client.put(f"/courses/{CID}/site", json={"url": SITE})
+    assert read == [SITE, OLD]
+    site = client.get(f"/courses/{CID}/site").json()
+    assert (site["url"], site["status"]) == (OLD, "done")

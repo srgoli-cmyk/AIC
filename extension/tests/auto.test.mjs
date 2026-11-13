@@ -54,7 +54,7 @@ test("records: success counts new lectures, failure flags a login, untracked fai
 });
 
 test("badge: ! for a login, +n for new lectures, nothing otherwise", () => {
-  assert.deepEqual(badge({ 1: rec({ unseen: 2 }), 2: rec({ unseen: 1 }) }), { text: "+3", color: "#c8f560" });
+  assert.deepEqual(badge({ 1: rec({ unseen: 2 }), 2: rec({ unseen: 1 }) }), { text: "+3", color: "#f58bb4" });
   assert.equal(badge({ 1: rec({ unseen: 2, loginNeeded: true }) }).text, "!");
   assert.equal(badge({ 1: rec({ unseen: 2, on: false }) }).text, "");
   assert.equal(badge({ 1: rec({ unseen: 500 }) }).text, "99+");

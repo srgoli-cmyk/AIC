@@ -42,6 +42,8 @@ class FakeLLM:
 
     def __call__(self, messages, **options):
         self.calls.append((messages, options))
+        if not self.replies:
+            raise answer.AnswerUnavailable  # e.g. a lesson's check nobody gave a reply for
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -54,6 +56,7 @@ def lecture(monkeypatch):
     monkeypatch.setattr(study, "settings", replace(study.settings, openrouter_api_key=FAKE_KEY))
     monkeypatch.setattr(db, "lecture_exists", lambda entry_id: entry_id == ENTRY)
     monkeypatch.setattr(db, "lecture_chunks", lambda entry_id: HITS)
+    monkeypatch.setattr(study.slidematch, "slide_pages_for", lambda entry_id, chunks: [])
 
     def reply_with(*replies):
         fake = FakeLLM(*replies)
@@ -408,3 +411,85 @@ def db_root():
     from pathlib import Path
 
     return Path(__file__).resolve().parents[2]
+
+
+# --- the lesson's problems are worked again ---
+
+
+def _lesson_with(*problems):
+    return {
+        "sections": [
+            {
+                "title": "Inverses",
+                "body": "An **inverse** undoes A.",
+                "citation": FIRST,
+                "problems": [
+                    {
+                        "question": q_,
+                        "steps": ["s"],
+                        "answer": a,
+                        "citation": FIRST,
+                        "from_lecture": True,
+                    }
+                    for q_, a in problems
+                ],
+            }
+        ],
+        "check": [],
+    }
+
+
+def test_a_lessons_answers_are_replaced_by_the_checked_working(lecture):
+    llm = lecture(
+        _lesson_with(
+            ("Solve $x + 2y = 5$, $3x + 4y = 6$.", "$(2, 1)$"), ("Invert the matrix.", "$B$")
+        ),
+        {
+            "problems": [
+                {
+                    "n": 1,
+                    "work": "x=-4",
+                    "steps": ["Subtract: $y = 4.5$.", "So $x = -4$."],
+                    "answer": "$x=-4, y=4.5$",
+                },
+                {"n": 2, "work": "no matrix given", "steps": [], "answer": ""},
+            ]
+        },
+    )
+    body = _study("teach").json()
+    problems = body["sections"][0]["problems"]
+    assert [p["answer"] for p in problems] == ["$x=-4, y=4.5$"]  # the unsolvable one is gone
+    assert problems[0]["steps"] == ["Subtract: $y = 4.5$.", "So $x = -4$."]
+    assert len(llm.calls) == 2 and "Problem 2: Invert the matrix." in llm.calls[1][0][1]["content"]
+
+
+def test_an_unreadable_check_keeps_the_lesson_as_written(lecture):
+    lecture(_lesson_with(("Solve $x = 1$.", "$1$")), "not json")
+    assert _study("teach").json()["sections"][0]["problems"][0]["answer"] == "$1$"
+
+
+@pytest.mark.parametrize(
+    "raw, shown",
+    [
+        (
+            "Let A = \\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}.",
+            "Let $A = \\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}$.",
+        ),
+        ("Multiply A^{-1} by \\vec{b}.", "Multiply $A^{-1}$ by $\\vec{b}$."),
+        ("$\\begin{bmatrix} 2 \\ 1 \\end{bmatrix}$", "$\\begin{bmatrix} 2 \\\\ 1 \\end{bmatrix}$"),
+        ("Find \\(\\det A\\) and \\[x^2\\].", "Find $\\det A$ and $$x^2$$."),
+        ("Solve x + 2y = 5.", "Solve x + 2y = 5."),
+        ("Already $a^2$ fine.", "Already $a^2$ fine."),
+    ],
+)
+def test_math_without_dollars_is_marked_so_the_page_draws_it(raw, shown):
+    assert study._rich(raw, 500) == shown
+
+
+def test_the_checks_use_the_check_model(lecture, monkeypatch):
+    monkeypatch.setattr(
+        study, "settings", replace(study.settings, openrouter_check_model="r/reasoner")
+    )
+    llm = lecture(_lesson_with(("Solve $x = 1$.", "$1$")), {"problems": []})
+    _study("teach")
+    assert [c[1]["model"] for c in llm.calls] == [None, "r/reasoner"]

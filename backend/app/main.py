@@ -62,6 +62,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # answer 503 until then.
     try:
         db.ensure_schema()
+        db.rename_documents(slides.display_name)
     except DB_DOWN:
         log.warning("database unavailable at startup; schema will be applied on first use")
     yield
@@ -238,27 +239,44 @@ _site_jobs_lock = threading.Lock()
 
 def _sync_site_job(course_id: str, url: str) -> None:
     """Background: read the site's lecture material into the course's documents. One job per
-    course at a time; progress is written to course_sites as it goes."""
+    course at a time; progress is written to course_sites as it goes. A job stops as soon as the
+    site is forgotten or replaced, and a site chosen while a job was running is read after it."""
     with _site_jobs_lock:
         if course_id in _site_jobs:
-            return
+            return  # the running job picks up the new choice when it ends
         _site_jobs.add(course_id)
 
     def counts(out) -> dict[str, int]:
         keys = ("found", "stored", "unchanged", "unreadable", "failed")
         return {k: getattr(out, k) for k in keys}
 
+    def progress(out) -> None:
+        if not db.update_site(course_id, url, "syncing", counts(out)):
+            raise coursesite.SiteChanged
+
     try:
-        out = coursesite.sync_site(
-            course_id, url, progress=lambda o: db.update_site(course_id, url, "syncing", counts(o))
-        )
-        db.update_site(course_id, url, "done", counts(out))
-    except Exception as exc:  # a background job must record its failure, not raise it
-        log.error("course site sync failed: %s", type(exc).__name__)
-        db.update_site(course_id, url, "failed", {})
-    finally:
+        while True:
+            try:
+                out = coursesite.sync_site(course_id, url, progress=progress)
+                db.update_site(course_id, url, "done", counts(out))
+            except coursesite.SiteChanged:
+                log.info("course site sync stopped: the site changed")
+            except Exception as exc:  # a background job must record its failure, not raise it
+                log.error("course site sync failed: %s", type(exc).__name__)
+                db.update_site(course_id, url, "failed", {})
+            with _site_jobs_lock:
+                site = db.get_site(course_id)
+                if site is None:
+                    # Forgotten mid-sync: a file stored after the forget must not stay behind.
+                    db.delete_web_documents_except(course_id, set())
+                if site is None or site.url == url or site.status != "syncing":
+                    _site_jobs.discard(course_id)
+                    return
+                url = site.url
+    except BaseException:
         with _site_jobs_lock:
             _site_jobs.discard(course_id)
+        raise
 
 
 def _facts_or_404(course_id: str) -> coursesite.CourseFacts:

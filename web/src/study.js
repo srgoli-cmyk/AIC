@@ -54,6 +54,7 @@ function rich(text, cls) {
 function sourceLink(source, label = "Play this part of the lecture ↗") {
   const url = source && safeUrl(source.url);
   if (!url) return null;
+  if (source.kind === "slides") label = "See it on the slide ↗"; // a page, not a moment to play
   return el("a", { class: "study-source", href: url, target: "_blank", rel: "noopener noreferrer" }, el("span", { class: "time" }, source.timestamp), label);
 }
 

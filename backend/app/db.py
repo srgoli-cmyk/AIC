@@ -9,6 +9,7 @@ Never log SQLAlchemy exceptions: their text can include bound parameters (captio
 import hashlib
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -730,14 +731,17 @@ def set_site(course_id: str, url: str, title: str, chosen_by: str) -> SiteInfo:
         return _site_info(site)
 
 
-def update_site(course_id: str, url: str, status: str, counts: dict[str, int]) -> None:
-    """Progress of a site sync. Ignored if the course has since moved to another site."""
+def update_site(course_id: str, url: str, status: str, counts: dict[str, int]) -> bool:
+    """Progress of a site sync. Ignored, and False, if the course has since moved to another
+    site or forgotten this one."""
     ensure_schema()
     with Session(engine) as session, session.begin():
-        session.execute(
-            update(CourseSite)
-            .where(CourseSite.course_id == course_id, CourseSite.url == url)
-            .values(status=status, updated_at=datetime.now(UTC), **counts)
+        return bool(
+            session.execute(
+                update(CourseSite)
+                .where(CourseSite.course_id == course_id, CourseSite.url == url)
+                .values(status=status, updated_at=datetime.now(UTC), **counts)
+            ).rowcount
         )
 
 
@@ -764,6 +768,19 @@ def delete_web_documents_except(course_id: str, keep: set[str]) -> int:
                 Document.doc_id.not_in(keep or {""}),
             )
         ).rowcount
+
+
+def rename_documents(tidy: Callable[[str], str]) -> int:
+    """Give every stored document the name `tidy` makes of it, for names stored before a rule
+    for them changed. Returns how many changed."""
+    ensure_schema()
+    with Session(engine) as session, session.begin():
+        changed = 0
+        for doc_id, name in session.execute(select(Document.doc_id, Document.name)).all():
+            if (new := tidy(name)) != name:
+                session.execute(update(Document).where(Document.doc_id == doc_id).values(name=new))
+                changed += 1
+        return changed
 
 
 def list_documents(course_id: str) -> list[DocumentInfo]:
@@ -860,6 +877,26 @@ def lecture_chunks(entry_id: str) -> list[ChunkHit]:
     )
     with Session(engine) as session:
         return [ChunkHit(*row, 0.0) for row in session.execute(stmt).all()]
+
+
+def lecture_course(entry_id: str) -> str | None:
+    ensure_schema()
+    with Session(engine) as session:
+        lecture = session.get(Lecture, entry_id)
+        return lecture.course_id if lecture else None
+
+
+def course_pages(course_id: str) -> list[tuple[str, str, str, int, str]]:
+    """Every document chunk of a course as (doc_id, name, url, page, text), page by page."""
+    ensure_schema()
+    stmt = (
+        select(Document.doc_id, Document.name, Document.url, DocChunk.page, DocChunk.text)
+        .join(Document, Document.doc_id == DocChunk.doc_id)
+        .where(Document.course_id == course_id)
+        .order_by(Document.doc_id, DocChunk.page, DocChunk.id)
+    )
+    with Session(engine) as session:
+        return [tuple(row) for row in session.execute(stmt).all()]
 
 
 def lecture_exists(entry_id: str) -> bool:

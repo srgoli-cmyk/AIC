@@ -20,6 +20,9 @@ class Settings:
     # Optional: a stronger model for the study tools only (lessons, flashcards, practice
     # problems). Empty uses openrouter_model.
     openrouter_study_model: str = os.getenv("OPENROUTER_STUDY_MODEL", "")
+    # The model that works a lesson's problems and the practice problems again to check them. A
+    # reasoning model: the writing model gets matrix arithmetic wrong far more often.
+    openrouter_check_model: str = os.getenv("OPENROUTER_CHECK_MODEL", "openai/gpt-5.6-luna")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     embedding_dim: int = int(os.getenv("EMBEDDING_DIM", "384"))
     cors_origin_regex: str = os.getenv(

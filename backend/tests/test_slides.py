@@ -135,6 +135,14 @@ def test_display_names_drop_the_extension_and_brackets():
     assert slides.display_name("a\nb]\x00.pdf") == "a b"
 
 
+def test_display_names_drop_doubled_extensions_and_download_copy_numbers():
+    assert slides.display_name("Oct12_filled.pdf.pdf") == "Oct12_filled"
+    assert slides.display_name("Lecture_12 (1).pdf") == "Lecture_12"
+    assert slides.display_name("Week 3 (2) .PDF") == "Week 3"
+    assert slides.display_name("Chapter (1) intro.pdf") == "Chapter (1) intro"
+    assert slides.display_name("(1).pdf") == "Slides"
+
+
 # --- citations of a page (no database) ---
 
 
@@ -360,3 +368,23 @@ def test_a_loosely_written_slide_citation_that_matches_nothing_is_removed():
         "True [Slides: Week 3, p. 3]. Also [slides week 9 page 4].", [_slide(3)]
     )
     assert "week 9" not in cleaned and "[Slides: Week 3, p. 3]" in cleaned
+
+
+@pytest.mark.integration
+def test_names_stored_before_the_rule_changed_are_tidied():
+    assert client.post("/sync", json=SAMPLE).status_code == 200
+    db.save_document(
+        CID,
+        "canvas-file-9",
+        source="canvas",
+        name="Oct12_filled.pdf",
+        url="https://canvas.ucsd.edu/courses/999999/files/9",
+        version="v",
+        content_hash="h",
+        pages=1,
+        chunks=[(1, "Some page text here.")],
+    )
+    assert db.rename_documents(slides.display_name) == 1
+    assert db.rename_documents(slides.display_name) == 0
+    names = [d["name"] for d in client.get(f"/courses/{CID}/documents").json()]
+    assert "Oct12_filled" in names

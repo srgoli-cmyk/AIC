@@ -172,10 +172,19 @@ def chunk_pages(pages: list[str]) -> list[PageChunk]:
     return chunks
 
 
+_TAIL = re.compile(r"(?:\.(?:pdf|pptx?|key)|\s*\(\d{1,2}\))\s*$", re.IGNORECASE)
+
+
 def display_name(name: str) -> str:
-    """The file name as it is cited: no extension, no brackets (they would end a citation), one
-    line. `Lecture 5 [draft].pdf` becomes `Lecture 5 draft`."""
-    name = re.sub(r"\.(pdf|pptx?|key)$", "", name.strip(), flags=re.IGNORECASE)
+    """The file name as it is cited: no extension (`Oct12.pdf.pdf` loses both), no copy number
+    a download added (`Week 3 (1).pdf`), no brackets (they would end a citation), one line.
+    `Lecture 5 [draft] (1).pdf` becomes `Lecture 5 draft`."""
+    name = name.strip()
+    while True:
+        tidier = _TAIL.sub("", name)
+        if tidier == name:
+            break
+        name = tidier
     name = re.sub(r"[\[\]\x00-\x1f]", " ", name)
     return " ".join(name.split())[:200] or "Slides"
 

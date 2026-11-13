@@ -100,7 +100,7 @@ export async function study(entryId, kind) {
   let res;
   try {
     // A lesson is a long reply, and practice problems are written and then checked.
-    res = await call("/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry_id: entryId, kind }) }, 150000);
+    res = await call("/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry_id: entryId, kind }) }, 300000); // writing, then a second model checks the math
   } catch (err) {
     if (err.message === "lecture not indexed") return { empty: true };
     throw err;

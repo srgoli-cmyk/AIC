@@ -535,6 +535,10 @@ def _same_site(href: str, root) -> bool:
     parts = urlsplit(href)
     if (parts.hostname or "").lower() != (root.hostname or "").lower():
         return False
+    # An encoded separator, a double encoding or a path parameter could make the path a server
+    # reads differ from the one checked here, so such a link is not followed.
+    if re.search(r"%(?:2f|5c|25)|;", parts.path, re.IGNORECASE):
+        return False
     # Decoded twice so `%2e%2e` and `%252e%252e` are seen as the `..` a server may read them as.
     path = unquote(unquote(parts.path)).replace("\\", "/")
     if any(seg in (".", "..") for seg in path.split("/")):
@@ -654,6 +658,11 @@ def check_site(facts: CourseFacts, url: str) -> Verdict:
     return judge(facts, final, title, text)
 
 
+class SiteChanged(Exception):
+    """Raised by a sync's progress callback: the student forgot this site or chose another, so
+    the sync stops."""
+
+
 def sync_site(course_id: str, site_url: str, progress=None) -> SiteSync:
     """Download the lecture material of a checked course site and store it as the course's
     documents (source "web"), each with the lecture number it belongs to. A file whose bytes are
@@ -711,6 +720,8 @@ def sync_site(course_id: str, site_url: str, progress=None) -> SiteSync:
             slides.embed_document(doc_id)
             out.stored += 1
     if materials:
+        if progress:
+            progress(out)  # last chance to stop, before removing anything
         # What the site no longer posts is not searched any more.
         db.delete_web_documents_except(course_id, {doc_id_for(m.url) for m in materials})
     log.info(
