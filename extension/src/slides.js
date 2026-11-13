@@ -37,7 +37,10 @@ export function deckKey(name) {
 
 const newer = (a, b) => (Date.parse(a.modified_at ?? "") || 0) - (Date.parse(b.modified_at ?? "") || 0) || a.id - b.id;
 
-/** One file per deck, the most recently modified; the ids of the older copies are returned too. */
+/**
+ * One file per deck, the most recently modified. `older` lists the other copies' ids and
+ * `replacedBy` maps each to the id of the copy that is kept instead.
+ */
 export function latestRevisions(files) {
   const best = new Map();
   for (const f of files) {
@@ -46,7 +49,12 @@ export function latestRevisions(files) {
     if (!held || newer(f, held) > 0) best.set(key, f);
   }
   const kept = new Set([...best.values()].map((f) => f.id));
-  return { kept: files.filter((f) => kept.has(f.id)), older: files.filter((f) => !kept.has(f.id)).map((f) => f.id) };
+  const older = files.filter((f) => !kept.has(f.id));
+  return {
+    kept: files.filter((f) => kept.has(f.id)),
+    older: older.map((f) => f.id),
+    replacedBy: new Map(older.map((f) => [f.id, best.get(deckKey(f.display_name)).id])),
+  };
 }
 
 // Lecture slides and notes are sent first; exams, solutions and the syllabus last, so a course
@@ -166,7 +174,7 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
   const out = { found: 0, sent: 0, unchanged: 0, failed: 0, unreadable: 0, later: 0, older: 0 };
   const all = files.filter(isSlideFile);
   out.found = all.length;
-  const { kept: slides, older } = latestRevisions(all);
+  const { kept: slides, older, replacedBy } = latestRevisions(all);
   out.older = older.length;
   if (!slides.length) return out;
   let stored;
@@ -177,24 +185,14 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
     out.failed = slides.length;
     return out;
   }
-  // An older copy the backend still holds is dropped, so it is not searched next to the new one.
-  for (const id of older.filter((id) => stored.has(`canvas-file-${id}`))) {
-    try {
-      await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${id}`, {
-        method: "DELETE",
-        credentials: "omit",
-        signal: timeoutSignal(FETCH_TIMEOUT_MS),
-      });
-    } catch {
-      // Left for the next sync.
-    }
-  }
   const todo = slides
     .filter((f) => stored.get(`canvas-file-${f.id}`) !== versionOf(f))
     .sort((a, b) => slideRank(a) - slideRank(b) || (Date.parse(b.modified_at ?? "") || 0) - (Date.parse(a.modified_at ?? "") || 0));
   out.unchanged = slides.length - todo.length;
   out.later = Math.max(0, todo.length - MAX_SLIDE_FILES);
   const now = todo.slice(0, MAX_SLIDE_FILES);
+  // Files the backend holds in their current version, so far.
+  const current = new Set(slides.filter((f) => stored.get(`canvas-file-${f.id}`) === versionOf(f)).map((f) => f.id));
   report({ stage: "slides", done: 0, total: now.length });
   for (const [i, file] of now.entries()) {
     const bytes = await download(fetchFn, courseId, file);
@@ -210,14 +208,30 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
           body: bytes,
           signal: timeoutSignal(SLIDE_TIMEOUT_MS),
         });
-        if (r.ok) out.sent++;
-        else if (r.status === 422) out.unreadable++; // scanned pages, or not really a PDF
+        if (r.ok) {
+          out.sent++;
+          current.add(file.id);
+        } else if (r.status === 422) out.unreadable++; // scanned pages, or not really a PDF
         else out.failed++;
       } catch {
         out.failed++;
       }
     }
     report({ stage: "slides", done: i + 1, total: now.length });
+  }
+  // An older copy the backend holds is dropped only once its newer copy is stored, so a deck is
+  // never left out of search; if the newer one failed or waits for the next sync, both stay.
+  for (const id of older) {
+    if (!stored.has(`canvas-file-${id}`) || !current.has(replacedBy.get(id))) continue;
+    try {
+      await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${id}`, {
+        method: "DELETE",
+        credentials: "omit",
+        signal: timeoutSignal(FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      // Left for the next sync.
+    }
   }
   return out;
 }

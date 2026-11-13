@@ -339,7 +339,12 @@ def test_concurrent_schema_applies_do_not_collide():
 
     try:
         with db.engine.begin() as conn:
-            conn.execute(text("DROP TABLE doc_chunks, documents, chunks, files, lectures, courses"))
+            conn.execute(
+                text(
+                    "DROP TABLE course_sites, doc_chunks, documents, chunks, files, lectures, "
+                    "courses"
+                )
+            )
         threads = [threading.Thread(target=apply) for _ in range(6)]
         for t in threads:
             t.start()

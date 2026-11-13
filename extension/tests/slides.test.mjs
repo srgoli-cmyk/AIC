@@ -220,3 +220,16 @@ test("only the newest copy is sent, an older copy the backend holds is removed, 
   assert.equal(out.older, 1);
   assert.match(slidesNote(out), /1 older copy skipped/);
 });
+
+test("an older copy stays until its newer copy is stored", async () => {
+  const files = [file(1, "Ch1.pdf", { modified_at: "2026-09-20T00:00:00Z" }), file(2, "Ch1_1015.pdf", { modified_at: "2026-10-15T00:00:00Z" })];
+  for (const o of [{ putStatus: { 2: 500 } }, { putStatus: { 2: 422 } }, { finalUrl: { 2: "https://evil.example/files/2" } }]) {
+    const w = world({ stored: [{ doc_id: "canvas-file-1", version: "old" }], ...o });
+    await run(w, files);
+    assert.deepEqual(w.deletes, [], JSON.stringify(o));
+  }
+  const held = world({ stored: [{ doc_id: "canvas-file-1", version: "old" }, { doc_id: "canvas-file-2", version: versionOf(files[1]) }] });
+  await run(held, files);
+  assert.deepEqual(held.deletes, [1], "the newer copy was already stored");
+  assert.deepEqual(held.puts, []);
+});

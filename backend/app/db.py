@@ -49,6 +49,7 @@ from .schemas import (
     DocumentInfo,
     LectureInfo,
     LectureStatus,
+    SiteInfo,
     SyncPayload,
     course_id_for,
 )
@@ -168,6 +169,23 @@ class Document(Base):
     pages: Mapped[int] = mapped_column(Integer)
     lecture_no: Mapped[int | None] = mapped_column(Integer)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CourseSite(Base):
+    __tablename__ = "course_sites"
+    course_id: Mapped[str] = mapped_column(
+        ForeignKey("courses.course_id", ondelete="CASCADE"), primary_key=True
+    )
+    url: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    chosen_by: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    found: Mapped[int] = mapped_column(Integer, default=0)
+    stored: Mapped[int] = mapped_column(Integer, default=0)
+    unchanged: Mapped[int] = mapped_column(Integer, default=0)
+    unreadable: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class DocChunk(Base):
@@ -652,6 +670,100 @@ def delete_document(course_id: str, doc_id: str) -> bool:
             delete(Document).where(Document.doc_id == doc_id, Document.course_id == course_id)
         ).rowcount
     return bool(gone)
+
+
+def course_facts(course_id: str) -> tuple[str, str, str | None, list[str], list[date]] | None:
+    """(code, name, term, instructors, lecture dates) of a synced course, or None."""
+    if "\x00" in course_id:
+        return None
+    ensure_schema()
+    with Session(engine) as session:
+        course = session.get(Course, course_id)
+        if course is None:
+            return None
+        dates = session.execute(
+            select(Lecture.recorded_at)
+            .where(Lecture.course_id == course_id, Lecture.recorded_at.is_not(None))
+            .distinct()
+        ).scalars()
+        return course.code, course.name, course.term, list(course.instructors or []), list(dates)
+
+
+def _site_info(site: CourseSite) -> SiteInfo:
+    return SiteInfo(
+        url=site.url,
+        title=site.title,
+        chosen_by=site.chosen_by,
+        status=site.status,
+        found=site.found,
+        stored=site.stored,
+        unchanged=site.unchanged,
+        unreadable=site.unreadable,
+        failed=site.failed,
+    )
+
+
+def get_site(course_id: str) -> SiteInfo | None:
+    ensure_schema()
+    with Session(engine) as session:
+        site = session.get(CourseSite, course_id)
+        return _site_info(site) if site else None
+
+
+def set_site(course_id: str, url: str, title: str, chosen_by: str) -> SiteInfo:
+    """Record the course's website (status "syncing", counts reset). Choosing another site
+    removes the documents that came from the old one."""
+    ensure_schema()
+    with Session(engine) as session, session.begin():
+        site = session.get(CourseSite, course_id, with_for_update=True)
+        if site is not None and site.url != url:
+            session.execute(
+                delete(Document).where(Document.course_id == course_id, Document.source == "web")
+            )
+        if site is None:
+            site = CourseSite(course_id=course_id)
+            session.add(site)
+        site.url, site.title, site.chosen_by, site.status = url, title[:200], chosen_by, "syncing"
+        site.found = site.stored = site.unchanged = site.unreadable = site.failed = 0
+        site.updated_at = datetime.now(UTC)
+        session.flush()
+        return _site_info(site)
+
+
+def update_site(course_id: str, url: str, status: str, counts: dict[str, int]) -> None:
+    """Progress of a site sync. Ignored if the course has since moved to another site."""
+    ensure_schema()
+    with Session(engine) as session, session.begin():
+        session.execute(
+            update(CourseSite)
+            .where(CourseSite.course_id == course_id, CourseSite.url == url)
+            .values(status=status, updated_at=datetime.now(UTC), **counts)
+        )
+
+
+def delete_site(course_id: str) -> bool:
+    """Forget the course's website and the documents that came from it."""
+    ensure_schema()
+    with Session(engine) as session, session.begin():
+        session.execute(
+            delete(Document).where(Document.course_id == course_id, Document.source == "web")
+        )
+        return bool(
+            session.execute(delete(CourseSite).where(CourseSite.course_id == course_id)).rowcount
+        )
+
+
+def delete_web_documents_except(course_id: str, keep: set[str]) -> int:
+    """Remove web documents of the course that the site no longer posts."""
+    ensure_schema()
+    with Session(engine) as session, session.begin():
+        return session.execute(
+            delete(Document).where(
+                Document.course_id == course_id,
+                Document.source == "web",
+                Document.doc_id.not_in(keep or {""}),
+            )
+        ).rowcount
 
 
 def list_documents(course_id: str) -> list[DocumentInfo]:

@@ -85,3 +85,19 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
 CREATE INDEX IF NOT EXISTS documents_course_idx ON documents(course_id);
 CREATE INDEX IF NOT EXISTS doc_chunks_doc_idx ON doc_chunks(doc_id);
 CREATE INDEX IF NOT EXISTS doc_chunks_embedding_idx ON doc_chunks USING hnsw (embedding vector_cosine_ops);
+
+-- The course's own website, once a search matched it or the student picked it, and how its
+-- last sync went. Its material is stored as documents with source "web".
+CREATE TABLE IF NOT EXISTS course_sites (
+    course_id   TEXT PRIMARY KEY REFERENCES courses(course_id) ON DELETE CASCADE,
+    url         TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    chosen_by   TEXT NOT NULL,              -- "search" (matched without asking) or "student"
+    status      TEXT NOT NULL,              -- "syncing", "done" or "failed"
+    found       INTEGER NOT NULL DEFAULT 0,
+    stored      INTEGER NOT NULL DEFAULT 0,
+    unchanged   INTEGER NOT NULL DEFAULT 0,
+    unreadable  INTEGER NOT NULL DEFAULT 0,
+    failed      INTEGER NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL
+);

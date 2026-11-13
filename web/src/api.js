@@ -26,6 +26,7 @@ async function call(path, init, timeoutMs) {
   } finally {
     clearTimeout(timer);
   }
+  if (res.status === 204) return null;
   let body;
   try {
     body = await res.json();
@@ -111,4 +112,40 @@ export async function study(entryId, kind) {
     sections: res.sections.map((x) => ({ ...x, problems: (x.problems || []).map((q) => ({ ...q, steps: q.steps || [], fromLecture: q.from_lecture === true })) })),
     check: Array.isArray(res.check) ? res.check : [],
   };
+}
+
+// ---------- Slides and the course website ----------
+
+const enc = encodeURIComponent;
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+/** The course's documents (Canvas files and pages from its website). */
+export async function documents(courseId) {
+  if (demo) return [];
+  const list = await call(`/courses/${enc(courseId)}/documents`, {}, 10000);
+  return Array.isArray(list) ? list : [];
+}
+
+/** The course's website and how its sync is going, or null. */
+export async function site(courseId) {
+  if (demo) return null;
+  return call(`/courses/${enc(courseId)}/site`, {}, 10000);
+}
+
+/** Search the web for the course's website: { site, candidates }. Up to a minute. */
+export async function searchSite(courseId) {
+  const res = await call(`/courses/${enc(courseId)}/site/search`, { method: "POST" }, 120000);
+  return { site: res?.site ?? null, candidates: Array.isArray(res?.candidates) ? res.candidates : [] };
+}
+
+export async function pickSite(courseId, url) {
+  return call(`/courses/${enc(courseId)}/site`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify({ url }) }, 30000);
+}
+
+export async function resyncSite(courseId) {
+  return call(`/courses/${enc(courseId)}/site/sync`, { method: "POST" }, 10000);
+}
+
+export async function forgetSite(courseId) {
+  return call(`/courses/${enc(courseId)}/site`, { method: "DELETE" }, 10000);
 }

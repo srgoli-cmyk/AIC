@@ -4,6 +4,7 @@ import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, s
 import { $, el } from "./dom.js";
 import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel, sourceUrl } from "./render.js";
 import { hideStudy, showStudy, STUDY } from "./study.js";
+import { hideSlidesPanel, showSlidesPanel } from "./site.js";
 
 const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask" };
 
@@ -303,6 +304,7 @@ function renderCourse() {
   renderLectures();
   renderScope();
   renderModes();
+  showSlidesPanel(state.course.course_id);
 }
 
 // ---------- Ask ----------
@@ -359,6 +361,7 @@ async function route() {
   const params = new URLSearchParams(location.search);
   const courseId = params.get("course");
   if (!courseId) {
+    hideSlidesPanel();
     state.course = null;
     try {
       state.courses = await api.courses();

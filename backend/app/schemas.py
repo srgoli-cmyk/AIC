@@ -163,6 +163,35 @@ class DocumentInfo(BaseModel):
     indexed: bool
 
 
+class SiteCandidate(BaseModel):
+    url: str
+    title: str
+    decision: Literal["accept", "ask"]
+    term_found: str | None
+    reasons: list[str]
+
+
+class SiteInfo(BaseModel):
+    url: str
+    title: str
+    chosen_by: Literal["search", "student"]
+    status: Literal["syncing", "done", "failed"]
+    found: int
+    stored: int
+    unchanged: int
+    unreadable: int
+    failed: int
+
+
+class SiteSearch(BaseModel):
+    site: SiteInfo | None
+    candidates: list[SiteCandidate]
+
+
+class SitePick(_Strict):
+    url: str = Field(min_length=9, max_length=2000, pattern=r"^https://")
+
+
 class DocumentStored(BaseModel):
     doc_id: str
     pages: int

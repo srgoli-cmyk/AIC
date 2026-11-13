@@ -204,3 +204,19 @@ a.source-head:hover .open { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Slides and the course website ---------- */
+.slides-panel { margin: 18px 0 0; max-width: 760px; padding: 16px 20px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+.slides-panel p { margin: 0; color: var(--muted); line-height: 1.55; }
+.slides-panel .site-line { margin-top: 8px; color: var(--ink); }
+.slides-panel .site-line a { color: var(--accent-ink); }
+.slides-panel .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.slides-panel button { font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+.slides-panel button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+.slides-panel button:disabled { opacity: 0.55; cursor: default; }
+.slides-panel .candidates { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.slides-panel .candidates li { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); display: grid; gap: 4px; }
+.slides-panel .cand-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.slides-panel .cand-url { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.slides-panel .cand-why { font-size: 13px; color: var(--muted); }
+.slides-panel .error { color: var(--accent-ink); margin-top: 8px; }

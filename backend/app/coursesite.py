@@ -630,7 +630,31 @@ def doc_id_for(url: str) -> str:
     return "web-" + hashlib.sha256(url.encode()).hexdigest()[:24]
 
 
-def sync_site(course_id: str, site_url: str) -> SiteSync:
+def facts_for(course_id: str) -> CourseFacts | None:
+    """What the backend knows about a synced course, for checking a site against it."""
+    row = db.course_facts(course_id)
+    if row is None:
+        return None
+    code, name, term, instructors, dates = row
+    return CourseFacts(
+        code=code, name=name, term=term, instructors=tuple(instructors), lecture_dates=tuple(dates)
+    )
+
+
+def check_site(facts: CourseFacts, url: str) -> Verdict:
+    """Fetch one page the student picked and judge it like a search result. A page that cannot be
+    fetched is rejected."""
+    try:
+        final, kind, body = fetch(url)
+    except FetchRefused:
+        return Verdict(url=url, decision=REJECT, score=0, reasons=["could not open the page"])
+    if kind != "text/html":
+        return Verdict(url=final, decision=REJECT, score=0, reasons=["not a web page"])
+    title, text, _ = page_text_and_links(body, final)
+    return judge(facts, final, title, text)
+
+
+def sync_site(course_id: str, site_url: str, progress=None) -> SiteSync:
     """Download the lecture material of a checked course site and store it as the course's
     documents (source "web"), each with the lecture number it belongs to. A file whose bytes are
     unchanged is skipped. Embedding runs here, since this is already a background job."""
@@ -638,8 +662,12 @@ def sync_site(course_id: str, site_url: str) -> SiteSync:
     materials = lecture_materials(site_url)[:MAX_MATERIALS]
     out.found = len(materials)
     known = {d.doc_id: d.version for d in db.list_documents(course_id)}
+    if progress:
+        progress(out)
     with new_client() as client:
         for m in materials:
+            if progress:
+                progress(out)
             doc_id = doc_id_for(m.url)
             try:
                 final, kind, body = fetch(m.url, max_bytes=slides.MAX_BYTES, client=client)
@@ -682,6 +710,9 @@ def sync_site(course_id: str, site_url: str) -> SiteSync:
                 continue
             slides.embed_document(doc_id)
             out.stored += 1
+    if materials:
+        # What the site no longer posts is not searched any more.
+        db.delete_web_documents_except(course_id, {doc_id_for(m.url) for m in materials})
     log.info(
         "course site sync: found=%d stored=%d unchanged=%d unreadable=%d failed=%d",
         out.found,

@@ -4,11 +4,13 @@ chunked and embedded in the background (app/ingest.py); /ask answers from the st
 (app/study.py)."""
 
 import logging
+import re
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, db, ingest, slides, study
+from . import answer, coursesite, db, ingest, slides, study
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -29,6 +31,10 @@ from .schemas import (
     LectureStatus,
     LessonResponse,
     PracticeResponse,
+    SiteCandidate,
+    SiteInfo,
+    SitePick,
+    SiteSearch,
     StudyRequest,
     SyncPayload,
     SyncResponse,
@@ -71,6 +77,18 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
+
+
+def _trusted_origin(request: Request) -> None:
+    """Calls that change or cost something are refused from other web pages. A browser sends
+    `Origin` with a cross-site request, and a POST with no body needs no CORS preflight, so CORS
+    alone would not stop a page from starting a paid web search or a delete."""
+    origin = request.headers.get("origin")
+    if origin and not re.fullmatch(settings.cors_origin_regex, origin):
+        raise HTTPException(status_code=403, detail="origin not allowed")
+
+
+TRUSTED = [Depends(_trusted_origin)]
 
 
 @app.exception_handler(OperationalError)
@@ -182,7 +200,11 @@ def course_documents(course_id: str) -> list[DocumentInfo]:
     return db.list_documents(course_id)
 
 
-@app.put("/courses/{course_id}/documents/canvas/{canvas_file_id}", response_model=DocumentStored)
+@app.put(
+    "/courses/{course_id}/documents/canvas/{canvas_file_id}",
+    response_model=DocumentStored,
+    dependencies=TRUSTED,
+)
 async def put_canvas_document(
     course_id: str,
     canvas_file_id: int,
@@ -208,7 +230,119 @@ async def put_canvas_document(
     )
 
 
-@app.delete("/courses/{course_id}/documents/canvas/{canvas_file_id}", status_code=204)
+# --- the course's own website ---
+
+_site_jobs: set[str] = set()
+_site_jobs_lock = threading.Lock()
+
+
+def _sync_site_job(course_id: str, url: str) -> None:
+    """Background: read the site's lecture material into the course's documents. One job per
+    course at a time; progress is written to course_sites as it goes."""
+    with _site_jobs_lock:
+        if course_id in _site_jobs:
+            return
+        _site_jobs.add(course_id)
+
+    def counts(out) -> dict[str, int]:
+        keys = ("found", "stored", "unchanged", "unreadable", "failed")
+        return {k: getattr(out, k) for k in keys}
+
+    try:
+        out = coursesite.sync_site(
+            course_id, url, progress=lambda o: db.update_site(course_id, url, "syncing", counts(o))
+        )
+        db.update_site(course_id, url, "done", counts(out))
+    except Exception as exc:  # a background job must record its failure, not raise it
+        log.error("course site sync failed: %s", type(exc).__name__)
+        db.update_site(course_id, url, "failed", {})
+    finally:
+        with _site_jobs_lock:
+            _site_jobs.discard(course_id)
+
+
+def _facts_or_404(course_id: str) -> coursesite.CourseFacts:
+    facts = coursesite.facts_for(course_id)
+    if facts is None:
+        raise HTTPException(status_code=404, detail="course not synced")
+    return facts
+
+
+@app.get("/courses/{course_id}/site", response_model=SiteInfo | None)
+def course_site(course_id: str) -> SiteInfo | None:
+    """The course's website and how its sync is going, or null when none is chosen yet."""
+    _facts_or_404(course_id)
+    return db.get_site(course_id)
+
+
+@app.post("/courses/{course_id}/site/search", response_model=SiteSearch, dependencies=TRUSTED)
+def search_course_site(course_id: str, background: BackgroundTasks) -> SiteSearch:
+    """Search the web for the course's own website and check each result against what Canvas
+    says about the course. A page that matches (course, term, school, and off ucsd.edu also the
+    lecture calendar) is used right away unless the student already picked one; pages that
+    might be it are returned for the student to decide. Takes up to a minute."""
+    facts = _facts_or_404(course_id)
+    if not settings.openrouter_api_key:
+        raise HTTPException(status_code=503, detail="web search needs OPENROUTER_API_KEY")
+    verdicts = coursesite.find_course_site(facts)
+    current = db.get_site(course_id)
+    best = verdicts[0] if verdicts and verdicts[0].decision == coursesite.ACCEPT else None
+    if best and not (current and current.chosen_by == "student"):
+        if current is None or current.url != best.url or current.status == "failed":
+            current = db.set_site(course_id, best.url, best.title, "search")
+            background.add_task(_sync_site_job, course_id, best.url)
+    candidates = [
+        SiteCandidate(
+            url=v.url,
+            title=v.title,
+            decision=v.decision,
+            term_found=v.term_found,
+            reasons=v.reasons,
+        )
+        for v in verdicts
+        if v.decision in (coursesite.ACCEPT, coursesite.ASK)
+    ][:5]
+    return SiteSearch(site=current, candidates=candidates)
+
+
+@app.put("/courses/{course_id}/site", response_model=SiteInfo, dependencies=TRUSTED)
+def pick_course_site(course_id: str, pick: SitePick, background: BackgroundTasks) -> SiteInfo:
+    """The student's choice of website (usually one the search asked about). It is checked again
+    here: a page that is not this course's is refused."""
+    facts = _facts_or_404(course_id)
+    verdict = coursesite.check_site(facts, pick.url)
+    if verdict.decision == coursesite.REJECT:
+        raise HTTPException(
+            status_code=422, detail="not this course's website: " + "; ".join(verdict.reasons)
+        )
+    site = db.set_site(course_id, verdict.url, verdict.title, "student")
+    background.add_task(_sync_site_job, course_id, verdict.url)
+    return site
+
+
+@app.post("/courses/{course_id}/site/sync", response_model=SiteInfo, dependencies=TRUSTED)
+def resync_course_site(course_id: str, background: BackgroundTasks) -> SiteInfo:
+    """Read the chosen site again for new or changed material."""
+    _facts_or_404(course_id)
+    site = db.get_site(course_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="no website chosen")
+    db.update_site(course_id, site.url, "syncing", {})
+    background.add_task(_sync_site_job, course_id, site.url)
+    return db.get_site(course_id)
+
+
+@app.delete("/courses/{course_id}/site", status_code=204, dependencies=TRUSTED)
+def forget_course_site(course_id: str) -> Response:
+    """Not this site: forget it and remove what was read from it."""
+    _facts_or_404(course_id)
+    db.delete_site(course_id)
+    return Response(status_code=204)
+
+
+@app.delete(
+    "/courses/{course_id}/documents/canvas/{canvas_file_id}", status_code=204, dependencies=TRUSTED
+)
 def delete_canvas_document(course_id: str, canvas_file_id: int) -> Response:
     """Drop a Canvas file the extension found a newer copy of (`Week 3_1015.pdf` replacing
     `Week 3.pdf`), so an old revision is not searched next to the new one."""

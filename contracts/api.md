@@ -97,6 +97,26 @@ Response `200`: `{"doc_id": "canvas-file-7", "pages": 24, "chunks": 26, "status"
 ### DELETE /courses/{course_id}/documents/canvas/{canvas_file_id}
 Removes one Canvas document and its pages. The extension calls it for an older copy of a deck when a newer one is posted (`Week 3.pdf` and `Week 3_1015.pdf`: the most recently modified is kept). Response `204`. `404`: the course has no such document (another course's document is never touched). `422`: invalid file id.
 
+### The course's own website
+Some courses post their slides on their own site (dsc10.com) rather than on Canvas. The backend finds that site with a web search, checks each result against what the synced course says (code, school, term, instructors, lecture dates), and reads the site's lecture material (PDF, PowerPoint, public Google Slides, notebook pages) into documents with `"source": "web"`.
+
+`GET /courses/{course_id}/site` → `200` with the site, or `null` when none is chosen:
+```json
+{"url": "https://dsc10.com/", "title": "Home | DSC 10", "chosen_by": "search", "status": "syncing",
+ "found": 31, "stored": 12, "unchanged": 0, "unreadable": 1, "failed": 0}
+```
+`chosen_by` is `"search"` (it matched without asking) or `"student"`. `status` is `"syncing"`, `"done"` or `"failed"`; the counts grow while it syncs.
+
+`POST /courses/{course_id}/site/search` → `200 {"site": <site or null>, "candidates": [{"url", "title", "decision", "term_found", "reasons": ["..."]}]}`. Takes up to a minute. `decision` is `"accept"` (matched: course, school, this term, and off a ucsd.edu address also this term's lecture calendar and an instructor) or `"ask"` (could be it: another term, or not enough to be sure). An `accept` becomes the site and starts syncing unless the student already picked one. At most 5 candidates. `503`: no web search key configured.
+
+`PUT /courses/{course_id}/site` body `{"url": "https://..."}` → `200` site. The page is fetched and checked again; `422 {"detail": "not this course's website: ..."}` if it does not match. Choosing another site removes the old site's documents.
+
+`POST /courses/{course_id}/site/sync` → `200` site: read the chosen site again. `404` when none is chosen.
+
+`DELETE /courses/{course_id}/site` → `204`: forget the site and remove its documents (Canvas files stay).
+
+All of these return `404` for a course that is not synced. Only public `https` pages are fetched.
+
 ### Slides in /ask
 A page of a document is cited as `[Slides: <name>, p. <page>]`. Its entry in `sources` has `"kind": "slides"`, `"page"`, `"timestamp": "p. <page>"`, `lecture_title` = the document's name, `entry_id` = its `doc_id`, `start_sec` = `end_sec` = the page number, and `url` = the file's page on Canvas. Lecture sources have `"kind": "lecture"` and `"page": null`. A question about one lecture (`entry_id` in the request) does not search slides.
 
