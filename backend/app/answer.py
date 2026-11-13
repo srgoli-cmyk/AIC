@@ -216,7 +216,7 @@ _BRACKETS = re.compile(r"\[([^\[\]]*)\]|\(([^()]*)\)")
 _TIME = re.compile(r"(?<![\d:])(\d+):(\d{2})(?::(\d{2}))?(?![\d:])")
 _RANGE_DASHES = ("-", "–", "—")  # hyphen, en dash, em dash
 # A page citation has no time in it, so one that matches no passage is recognised by its shape.
-_SLIDE_CITATION = re.compile(r"^\s*Slides:.*\bp\.\s*\d+", re.IGNORECASE | re.DOTALL)
+_SLIDE_CITATION = re.compile(r"\bslides?\b.*\bp(?:age|g)?\.?\s*\d+", re.IGNORECASE | re.DOTALL)
 
 
 def _seconds(first: str, second: str, third: str | None) -> int:
@@ -340,6 +340,15 @@ def source_url(media_url: str, start_sec: float) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
+def document_url(url: str, page: int) -> str:
+    """A PDF on a course website opens at the cited page (`#page=N`, which browsers' PDF viewers
+    read). Canvas file pages and HTML lecture pages have no such anchor and are left as they are."""
+    parts = urlsplit(url)
+    if parts.path.lower().endswith(".pdf") and not parts.fragment:
+        return urlunsplit(parts._replace(fragment=f"page={page}"))
+    return url
+
+
 def to_source(hit: db.ChunkHit) -> Source:
     if hit.page is not None:
         return Source(
@@ -349,7 +358,7 @@ def to_source(hit: db.ChunkHit) -> Source:
             start_sec=hit.start_sec,
             end_sec=hit.end_sec,
             timestamp=f"p. {hit.page}",
-            url=hit.media_url,
+            url=document_url(hit.media_url, hit.page),
             snippet=_snippet(hit.text),
             page=hit.page,
         )

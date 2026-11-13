@@ -29,6 +29,10 @@ MAX_TOTAL_CHARS = 1_500_000
 CHUNK_CHARS = 1500
 # A page with less text than this is a picture or a title; nothing to search.
 MIN_PAGE_CHARS = 20
+# A PowerPoint is a zip. Its unpacked size is checked before anything is unpacked, so a small
+# file cannot expand into gigabytes.
+MAX_UNPACKED_BYTES = 300 * 1024 * 1024
+MAX_ZIP_ENTRIES = 5000
 EMBED_BATCH = 32
 
 PDF = "pdf"
@@ -52,6 +56,12 @@ def kind_of(data: bytes) -> str | None:
     if data[:4] == b"PK\x03\x04":
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as z:
+                entries = z.infolist()
+                if (
+                    len(entries) > MAX_ZIP_ENTRIES
+                    or sum(e.file_size for e in entries) > MAX_UNPACKED_BYTES
+                ):
+                    return None
                 if "ppt/presentation.xml" in z.namelist():
                     return PPTX
         except zipfile.BadZipFile:
@@ -63,6 +73,9 @@ def _tidy(text: str) -> str:
     # NUL cannot be stored; runs of spaces and blank lines carry nothing.
     text = text.replace("\x00", " ")
     text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    # In the prompt every passage starts with a "Citation: [..]" line. Page text must not be
+    # able to write one of its own and pass for another passage.
+    text = re.sub(r"(?im)^\s*citation\s*:", "Citation -", text)
     return re.sub(r"\n\s*\n+", "\n\n", text).strip()[:MAX_PAGE_CHARS]
 
 
@@ -72,6 +85,8 @@ def _pdf_pages(data: bytes) -> list[str]:
     reader = PdfReader(io.BytesIO(data))
     if reader.is_encrypted and not reader.decrypt(""):
         raise UnreadableDocument
+    if len(reader.pages) > MAX_PAGES * 5:
+        raise UnreadableDocument  # not a slide deck or a set of notes
     pages = []
     for page in reader.pages[:MAX_PAGES]:
         try:
@@ -166,11 +181,25 @@ def display_name(name: str) -> str:
 
 
 def store(
-    course_id: str, doc_id: str, *, source: str, name: str, url: str, version: str, data: bytes
+    course_id: str,
+    doc_id: str,
+    *,
+    source: str,
+    name: str,
+    url: str,
+    version: str,
+    data: bytes,
+    lecture_no: int | None = None,
+    pages: list[str] | None = None,
 ) -> tuple[int, int]:
     """Read the file and store its chunks without embeddings (embed_document adds them).
+    `pages` gives the text when the caller already read it (an HTML lecture page, cut into its
+    sections); otherwise `data` must be a PDF or PowerPoint.
     Returns (pages, chunks). Raises UnreadableDocument; a document with no text at all is one."""
-    pages = extract_pages(data)
+    if pages is None:
+        pages = extract_pages(data)
+    else:
+        pages = [_tidy(p) for p in pages[:MAX_PAGES]]
     chunks = chunk_pages(pages)
     if not chunks:
         raise UnreadableDocument
@@ -184,6 +213,7 @@ def store(
         content_hash=hashlib.sha256(data).hexdigest(),
         pages=len(pages),
         chunks=[(c.page, c.text) for c in chunks],
+        lecture_no=lecture_no,
     )
     return len(pages), len(chunks)
 

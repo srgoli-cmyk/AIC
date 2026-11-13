@@ -2,7 +2,7 @@ import "./look.js";
 import * as api from "./api.js";
 import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, schedule, sectionsOf, termRange, topic } from "./course.js";
 import { $, el } from "./dom.js";
-import { answerHtml, renderMath, safeUrl, sourceLabel } from "./render.js";
+import { answerHtml, renderMath, safeUrl, sourceLabel, sourceUrl } from "./render.js";
 import { hideStudy, showStudy, STUDY } from "./study.js";
 
 const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask" };
@@ -310,7 +310,7 @@ function renderCourse() {
 function showSources(sources) {
   $("sources").replaceChildren(
     ...sources.map((s, i) => {
-      const url = safeUrl(s.url);
+      const url = sourceUrl(s);
       return el(
         "li",
         { id: `source-${i}` },

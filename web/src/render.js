@@ -12,6 +12,20 @@ export function safeUrl(url) {
   return SOURCE_URL.test(url) ? url : null;
 }
 
+/**
+ * The link of a source. A slide source from the course's own website may be any https page:
+ * its link comes from the backend's stored documents, never from the model's words.
+ */
+export function sourceUrl(source) {
+  if (source?.kind !== "slides") return safeUrl(source?.url);
+  try {
+    const u = new URL(source.url);
+    return u.protocol === "https:" && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function sourceLabel(source) {
   // A page of a document is cited as `Slides: <name>, p. <page>` (backend/app/answer.py).
   if (source.kind === "slides") return `Slides: ${source.lecture_title}, ${source.timestamp}`;

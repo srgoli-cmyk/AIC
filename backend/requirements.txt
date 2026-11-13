@@ -16,3 +16,7 @@ ruff>=0.6
 # slides: text from PDF and PowerPoint files
 pypdf>=5
 python-pptx>=1.0
+
+# course websites: reading pages, and certificates checked against the system store
+beautifulsoup4>=4.12
+truststore>=0.10
