@@ -79,14 +79,25 @@ function allowedDownloadUrl(url) {
   }
 }
 
-/** The file's bytes, or null. Refuses a download that ends on a host that is not Canvas's. */
+/**
+ * The file's bytes, or null. Canvas is asked for the file's signed link with the login; the link
+ * itself is fetched without it. Canvas keeps its files on its file service
+ * (`*.inscloudgate.net`), which allows any origin but not a request that carries cookies, so a
+ * download that followed Canvas's redirect with the login would be blocked, and no extra host
+ * permission is needed this way. A link or a redirect to a host that is not Canvas's is refused.
+ */
 async function download(fetchFn, courseId, file) {
   let r;
   try {
-    r = await fetchFn(`${CANVAS_ORIGIN}/courses/${courseId}/files/${file.id}/download?download_frd=1`, {
+    const link = await fetchFn(`${CANVAS_ORIGIN}/api/v1/files/${file.id}/public_url`, {
       credentials: "include",
-      signal: timeoutSignal(SLIDE_TIMEOUT_MS),
+      headers: { Accept: "application/json" },
+      signal: timeoutSignal(FETCH_TIMEOUT_MS),
     });
+    if (!link.ok) return null;
+    const signed = JSON.parse(stripPrefix(await link.text()))?.public_url;
+    if (typeof signed !== "string" || !allowedDownloadUrl(signed)) return null;
+    r = await fetchFn(signed, { credentials: "omit", signal: timeoutSignal(SLIDE_TIMEOUT_MS) });
   } catch {
     return null;
   }

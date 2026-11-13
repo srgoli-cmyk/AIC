@@ -293,6 +293,11 @@ def test_the_course_code_counts_only_in_the_host_or_path():
         ("https://SITE.example/dsc10/a/b.pdf", True),
         ("https://site.example/dsc10-old/lec01.pdf", False),
         ("https://site.example/dsc10/../admin/x.pdf", False),
+        ("https://site.example/dsc10/%2e%2e/admin/x.pdf", False),
+        ("https://site.example/dsc10/%252E%252E/admin/x.pdf", False),
+        ("https://site.example/dsc10/..%5cadmin/x.pdf", False),
+        ("https://site.example/dsc10", True),  # the folder itself
+        ("https://site.example/dsc10/sub/lec02.html", True),
         ("https://other.example/dsc10/lec01.pdf", False),
     ],
 )

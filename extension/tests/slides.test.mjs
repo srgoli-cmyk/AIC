@@ -38,15 +38,17 @@ function world(o = {}) {
       }
     }
     if (u.origin === "https://canvas.ucsd.edu") {
-      const d = /^\/courses\/12345\/files\/(\d+)\/download$/.exec(u.pathname);
+      const d = /^\/api\/v1\/files\/(\d+)\/public_url$/.exec(u.pathname);
       if (d) {
         if (o.downloadStatus?.[d[1]]) return res("", { status: o.downloadStatus[d[1]] });
-        return res(o.body?.[d[1]] ?? "%PDF-1.4 fake", { url: o.finalUrl?.[d[1]] ?? `https://inst-fs-pdx-prod.inscloudgate.net/files/${d[1]}?token=SECRETTOKEN`, headers: o.downloadHeaders?.[d[1]] ?? {} });
+        return res(`while(1);${JSON.stringify({ public_url: o.signed?.[d[1]] ?? `https://inst-fs-pdx-prod.inscloudgate.net/files/${d[1]}?token=SECRETTOKEN` })}`);
       }
       if (u.pathname === "/api/v1/courses/12345/modules") return res(`while(1);${JSON.stringify(o.modules ?? [])}`);
       const f = /^\/api\/v1\/courses\/12345\/files\/(\d+)$/.exec(u.pathname);
       if (f) return o.fileMeta?.[f[1]] ? res(`while(1);${JSON.stringify(o.fileMeta[f[1]])}`) : res("", { status: 403 });
     }
+    const s = /\/files\/(\d+)/.exec(u.pathname);
+    if (s) return res(o.body?.[s[1]] ?? "%PDF-1.4 fake", { url: o.finalUrl?.[s[1]] ?? url, headers: o.downloadHeaders?.[s[1]] ?? {} });
     return res("", { status: 404 });
   };
   return { fetch, calls, puts };
@@ -80,8 +82,12 @@ test("new files are downloaded with the login and sent to the backend without it
     { id: 1, name: "Week 1.pdf", version: "1001:2026-10-01T00:00:00Z", bytes: 13, credentials: "omit" },
     { id: 2, name: "Deck.pptx", version: "1002:2026-10-01T00:00:00Z", bytes: 13, credentials: "omit" },
   ]);
-  const downloads = w.calls.filter((c) => c.url.includes("/download"));
-  assert.ok(downloads.every((c) => c.init.credentials === "include"));
+  const links = w.calls.filter((c) => c.url.includes("/public_url"));
+  assert.equal(links.length, 2);
+  assert.ok(links.every((c) => c.init.credentials === "include"), "the signed link is asked for with the login");
+  const downloads = w.calls.filter((c) => c.url.includes("inscloudgate.net"));
+  assert.equal(downloads.length, 2);
+  assert.ok(downloads.every((c) => c.init.credentials === "omit"), "the file is fetched without it");
   assert.ok(!JSON.stringify(w.calls.filter((c) => c.url.startsWith(BACKEND))).includes("SECRET"), "the signed link never reaches the backend");
   assert.deepEqual(seen.at(-1), { stage: "slides", done: 2, total: 2 });
 });
@@ -91,17 +97,19 @@ test("a file the backend already has in this version is not downloaded again", a
   const out = await run(w, [file(1), file(2)]);
   assert.deepEqual([out.sent, out.unchanged], [1, 1]);
   assert.deepEqual(w.puts.map((p) => p.id), [2]);
-  assert.equal(w.calls.filter((c) => c.url.includes("/files/1/download")).length, 0);
+  assert.equal(w.calls.filter((c) => c.url.includes("/files/1/")).length, 0);
 });
 
 test("a download that ends on another host, fails, or is too big is not sent", async () => {
   const w = world({
-    finalUrl: { 1: "https://evil.example/files/1", 4: "https://inscloudgate.net.evil.example/x" },
+    finalUrl: { 1: "https://evil.example/files/1" },
+    signed: { 4: "https://inscloudgate.net.evil.example/files/4", 6: "http://inst-fs.inscloudgate.net/files/6" },
     downloadStatus: { 2: 403 },
     downloadHeaders: { 3: { "Content-Length": String(MAX_SLIDE_BYTES + 1) } },
   });
-  const out = await run(w, [file(1), file(2), file(3), file(4), file(5)]);
-  assert.deepEqual([out.sent, out.failed], [1, 4]);
+  const out = await run(w, [file(1), file(2), file(3), file(4), file(5), file(6)]);
+  assert.deepEqual([out.sent, out.failed], [1, 5]);
+  assert.ok(!w.calls.some((c) => c.url.includes("evil.example/files/4") || c.url.startsWith("http://inst-fs")), "a bad signed link is never fetched");
   assert.deepEqual(w.puts.map((p) => p.id), [5]);
 });
 
@@ -116,7 +124,7 @@ test("another app on the port, or a backend error, sends nothing and does not th
     const w = world(o);
     const out = await run(w, [file(1)]);
     assert.deepEqual([out.sent, out.failed], [0, 1]);
-    assert.equal(w.calls.filter((c) => c.url.includes("/download")).length, 0, "nothing is downloaded when it cannot be stored");
+    assert.equal(w.calls.filter((c) => c.url.includes("/public_url")).length, 0, "nothing is downloaded when it cannot be stored");
   }
   const down = await syncSlides({ fetchFn: async () => Promise.reject(new TypeError("fetch failed")), backendUrl: BACKEND, courseId: COURSE, files: [file(1)] });
   assert.equal(down.failed, 1);

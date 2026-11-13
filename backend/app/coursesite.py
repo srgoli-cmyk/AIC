@@ -20,7 +20,7 @@ import re
 import socket
 from dataclasses import dataclass, field
 from datetime import date
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import httpcore
 import httpx
@@ -535,11 +535,12 @@ def _same_site(href: str, root) -> bool:
     parts = urlsplit(href)
     if (parts.hostname or "").lower() != (root.hostname or "").lower():
         return False
-    segments = parts.path.split("/")
-    if ".." in segments or "%2e%2e" in parts.path.lower():
+    # Decoded twice so `%2e%2e` and `%252e%252e` are seen as the `..` a server may read them as.
+    path = unquote(unquote(parts.path)).replace("\\", "/")
+    if any(seg in (".", "..") for seg in path.split("/")):
         return False
-    folder = root.path.rsplit("/", 1)[0] + "/"
-    return folder == "/" or parts.path.startswith(folder)
+    folder = [s for s in root.path.rsplit("/", 1)[0].split("/") if s]
+    return [s for s in path.split("/") if s][: len(folder)] == folder
 
 
 def lecture_materials(site_url: str, *, max_pages: int = MAX_SITE_PAGES) -> list[Material]:
