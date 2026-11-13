@@ -1,6 +1,7 @@
 // The sync orchestrator. Everything it touches is injected (fetch, tabs, scripting, clock), and
 // every step is sequential: one request or one injected call at a time.
 import { confirmBackend, getLectures, postSync } from "./backend.js";
+import { fetchModuleFiles, mergeFiles, slidesNote, syncSlides } from "./slides.js";
 import { fetchCourse, fetchFiles, fetchSections, findMediaGalleryUrl, isCanvasUrl, parseCourseId } from "./canvas.js";
 import {
   CATEGORY_POLL_MS,
@@ -174,12 +175,20 @@ export async function runSync(deps) {
 
   report({ stage: "files", done: 0, total: 0 });
   let files = [];
+  let filesHidden = false;
   try {
     files = await fetchFiles(fetchFn, courseId);
   } catch {
     // Often forbidden for students. An empty list leaves already stored files alone.
-    notes.push("Course files could not be read, so none were synced.");
+    filesHidden = true;
   }
+  // Files linked from Modules can be read even when the Files tab is hidden.
+  try {
+    files = mergeFiles(files, await fetchModuleFiles(fetchFn, courseId));
+  } catch {
+    // No Modules, or they are hidden too.
+  }
+  if (filesHidden && !files.length) notes.push("Course files could not be read, so none were synced.");
 
   report({ stage: "gallery", done: 0, total: 0 });
   const galleryUrl = await findMediaGalleryUrl(fetchFn, courseId);
@@ -280,6 +289,10 @@ export async function runSync(deps) {
   if (reply.skippedOtherCourse) {
     notes.push(`${reply.skippedOtherCourse} lectures already belong to another course and were left unchanged.`);
   }
+
+  // The course now exists in the backend, so its slide files can be stored with it.
+  const slideNote = slidesNote(await syncSlides({ fetchFn, backendUrl, courseId, files, report }));
+  if (slideNote) notes.push(slideNote);
 
   let storedCount;
   try {

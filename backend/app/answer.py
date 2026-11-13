@@ -58,13 +58,18 @@ def format_timestamp(seconds: float) -> str:
 def citation_name(hit: db.ChunkHit) -> str:
     """`Lecture N`, or the title when the lecture has no number. Brackets are removed from titles
     and whitespace is collapsed, so the citation reads back the same as it was written."""
+    if hit.page is not None:
+        return f"Slides: {hit.lecture_title}"
     if hit.lecture_no is not None:
         return f"Lecture {hit.lecture_no}"
     return " ".join(re.sub(r"[\[\]]", " ", hit.lecture_title).split())
 
 
 def citation_label(hit: db.ChunkHit) -> str:
-    """The text inside the brackets of a citation: `Lecture N, m:ss`."""
+    """The text inside the brackets of a citation: `Lecture N, m:ss`, or for a page of a
+    document `Slides: <name>, p. <page>`."""
+    if hit.page is not None:
+        return f"{citation_name(hit)}, p. {hit.page}"
     return f"{citation_name(hit)}, {format_timestamp(hit.start_sec)}"
 
 
@@ -112,8 +117,8 @@ SYSTEM_PROMPT = (
     "the lecture starts explaining the point.\n"
     "- Put each citation right after the statement it supports, as you go along, instead of "
     "saving citations for the end, because a long reply can be cut off.\n"
-    "- Cite by copying that passage's citation exactly as given, for example [Lecture 8, 0:04], "
-    "one bracket per citation. Never invent a citation.\n"
+    "- Cite by copying that passage's citation exactly as given, for example [Lecture 8, 0:04] "
+    "or [Slides: Week 3, p. 12], one bracket per citation. Never invent a citation.\n"
     "- Write math in $...$ or $$...$$. Never use \\( \\) or \\[ \\]. Do not write links, "
     "images or HTML.\n"
     "- If the passages do not cover the topic, say so briefly and cite nothing. Do not answer "
@@ -210,6 +215,8 @@ def call_llm(
 _BRACKETS = re.compile(r"\[([^\[\]]*)\]|\(([^()]*)\)")
 _TIME = re.compile(r"(?<![\d:])(\d+):(\d{2})(?::(\d{2}))?(?![\d:])")
 _RANGE_DASHES = ("-", "–", "—")  # hyphen, en dash, em dash
+# A page citation has no time in it, so one that matches no passage is recognised by its shape.
+_SLIDE_CITATION = re.compile(r"^\s*Slides:.*\bp\.\s*\d+", re.IGNORECASE | re.DOTALL)
 
 
 def _seconds(first: str, second: str, third: str | None) -> int:
@@ -289,6 +296,8 @@ def cited_hits(answer: str, hits: list[db.ChunkHit]) -> tuple[list[db.ChunkHit],
     for m in _BRACKETS.finditer(answer):
         square = m.group(1) is not None
         found, unlabelled = _scan(m.group(1) if square else m.group(2), hits)
+        if square and not found and not unlabelled and _SLIDE_CITATION.search(m.group(1)):
+            unlabelled = 1  # a slide citation that names no given page
         matched = [i for label, sec in found for i in _matching(label, sec, hits)]
         cited.update(matched)
         if square:
@@ -332,6 +341,18 @@ def source_url(media_url: str, start_sec: float) -> str:
 
 
 def to_source(hit: db.ChunkHit) -> Source:
+    if hit.page is not None:
+        return Source(
+            kind="slides",
+            lecture_title=hit.lecture_title,
+            entry_id=hit.entry_id,
+            start_sec=hit.start_sec,
+            end_sec=hit.end_sec,
+            timestamp=f"p. {hit.page}",
+            url=hit.media_url,
+            snippet=_snippet(hit.text),
+            page=hit.page,
+        )
     return Source(
         lecture_title=hit.lecture_title,
         entry_id=hit.entry_id,
@@ -361,6 +382,10 @@ def answer_question(
     limit = max(top_k * 4, 40)
     if entry_id is None:
         hits = db.search_chunks(course_id, query_vector, limit)
+        # The course's slides are searched with its lectures; the closest of both are used.
+        slides = db.search_doc_chunks(course_id, query_vector, limit)
+        if slides:
+            hits = sorted([*hits, *slides], key=lambda h: h.distance)
     else:
         hits = db.search_chunks(course_id, query_vector, limit, entry_id=entry_id)
     if not hits:

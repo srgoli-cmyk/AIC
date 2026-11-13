@@ -133,6 +133,10 @@ class AskRequest(_Strict):
 
 
 class Source(BaseModel):
+    # "lecture": a moment in a recording. "slides": a page of a course document; then
+    # `lecture_title` is the document's name, `entry_id` its doc_id, `timestamp` is "p. <page>"
+    # and `start_sec` / `end_sec` both hold the page number.
+    kind: Literal["lecture", "slides"] = "lecture"
     lecture_title: str
     entry_id: str
     start_sec: float
@@ -140,11 +144,30 @@ class Source(BaseModel):
     timestamp: str
     url: str
     snippet: str
+    page: int | None = None
 
 
 class AskResponse(BaseModel):
     answer: str
     sources: list[Source]
+
+
+class DocumentInfo(BaseModel):
+    doc_id: str
+    source: Literal["canvas", "web"]
+    name: str
+    url: str
+    pages: int
+    version: str
+    lecture_no: int | None
+    indexed: bool
+
+
+class DocumentStored(BaseModel):
+    doc_id: str
+    pages: int
+    chunks: int
+    status: Literal["stored", "unchanged"]
 
 
 class StudyRequest(_Strict):

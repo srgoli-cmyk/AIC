@@ -57,3 +57,31 @@ CREATE TABLE IF NOT EXISTS chunks (
 
 CREATE INDEX IF NOT EXISTS chunks_entry_idx ON chunks(entry_id);
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_ops);
+
+-- Course documents (slides and notes as PDF or PowerPoint) and their search chunks. `source` is
+-- "canvas" (a Canvas file) or "web" (found on the course's own website). `version` is whatever
+-- tells the sender the file has not changed; `page` is the 1-based page or slide.
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id       TEXT PRIMARY KEY,               -- "canvas-file-<id>" or "web-<hash of url>"
+    course_id    TEXT NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,
+    source       TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    version      TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    pages        INTEGER NOT NULL,
+    lecture_no   INTEGER,
+    synced_at    TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS doc_chunks (
+    id         BIGSERIAL PRIMARY KEY,
+    doc_id     TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
+    page       INTEGER NOT NULL,
+    text       TEXT NOT NULL,
+    embedding  vector(384)
+);
+
+CREATE INDEX IF NOT EXISTS documents_course_idx ON documents(course_id);
+CREATE INDEX IF NOT EXISTS doc_chunks_doc_idx ON doc_chunks(doc_id);
+CREATE INDEX IF NOT EXISTS doc_chunks_embedding_idx ON doc_chunks USING hnsw (embedding vector_cosine_ops);

@@ -17,6 +17,13 @@ export const KS_PREFIX = "djJ8";
 export const MAX_CANVAS_PAGES = 20;
 export const MAX_GALLERY_PAGES = 20;
 export const MAX_FILES = 500;
+// Slides: PDF and PowerPoint files sent to the backend to be read. The backend refuses more than
+// 40 MB; at most this many files are sent in one sync and the rest wait for the next one.
+export const MAX_SLIDE_BYTES = 40 * 1024 * 1024;
+export const MAX_SLIDE_FILES = 60;
+export const SLIDE_TIMEOUT_MS = 120000;
+// Where a Canvas file download may end up after its redirect. Anything else is refused.
+export const FILE_DOWNLOAD_HOSTS = ["canvas.ucsd.edu", "inscloudgate.net", "instructure.com"];
 export const MAX_INSTRUCTORS = 20;
 export const MAX_SECTIONS = 50;
 export const MAX_LECTURES = 200;

@@ -5,13 +5,16 @@
 // inside the spans made here, so a `$` in plain text never becomes math.
 
 const SOURCE_URL =
-  /^https:\/\/(?:canvaskaf\.ucsd\.edu\/media\/t\/[0-9]_[a-z0-9]{8}(?:\/\d+)?(?:\?st=\d+)?|podcast\.ucsd\.edu\/watch\/[a-z]{2}[0-9]{2}\/[a-z0-9]{2,12}_[0-9]{3}-[0-9]{3}-[a-z]{2}\/[0-9]{1,3}(?:#\d+)?)$/;
+  /^https:\/\/(?:canvaskaf\.ucsd\.edu\/media\/t\/[0-9]_[a-z0-9]{8}(?:\/\d+)?(?:\?st=\d+)?|podcast\.ucsd\.edu\/watch\/[a-z]{2}[0-9]{2}\/[a-z0-9]{2,12}_[0-9]{3}-[0-9]{3}-[a-z]{2}\/[0-9]{1,3}(?:#\d+)?|canvas\.ucsd\.edu\/courses\/\d{1,15}\/files\/\d{1,16})$/;
 
+/** A lecture page at a time, or a Canvas file of a course (slides). Anything else is not linked. */
 export function safeUrl(url) {
   return SOURCE_URL.test(url) ? url : null;
 }
 
 export function sourceLabel(source) {
+  // A page of a document is cited as `Slides: <name>, p. <page>` (backend/app/answer.py).
+  if (source.kind === "slides") return `Slides: ${source.lecture_title}, ${source.timestamp}`;
   const m = /\bLecture\s+(\d+)/i.exec(source.lecture_title);
   const name = m ? `Lecture ${Number(m[1])}` : source.lecture_title.replace(/[[\]]/g, " ").replace(/\s+/g, " ").trim();
   return `${name}, ${source.timestamp}`;

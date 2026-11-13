@@ -318,8 +318,8 @@ function showSources(sources) {
           url ? "a" : "div",
           url ? { class: "source-head", href: url, target: "_blank", rel: "noopener noreferrer" } : { class: "source-head" },
           el("span", { class: "time" }, s.timestamp),
-          el("span", { class: "source-title" }, sourceLabel(s).replace(/, [\d:]+$/, "")),
-          url ? el("span", { class: "open" }, "Play from here ↗") : null
+          el("span", { class: "source-title" }, s.kind === "slides" ? `Slides: ${s.lecture_title}` : sourceLabel(s).replace(/, [\d:]+$/, "")),
+          url ? el("span", { class: "open" }, s.kind === "slides" ? "Open the slides ↗" : "Play from here ↗") : null
         ),
         el("p", {}, `“${s.snippet}”`)
       );

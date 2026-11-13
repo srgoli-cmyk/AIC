@@ -205,3 +205,15 @@ test("safeUrl accepts lecture pages only", () => {
     assert.equal(safeUrl(url), null, url);
   }
 });
+
+test("a slide source is labelled and cited by document name and page", () => {
+  const slide = { kind: "slides", lecture_title: "Lecture 5 slides", entry_id: "canvas-file-7", start_sec: 12, end_sec: 12, timestamp: "p. 12", url: "https://canvas.ucsd.edu/courses/999999/files/7", snippet: "s", page: 12 };
+  assert.equal(sourceLabel(slide), "Slides: Lecture 5 slides, p. 12", "not mistaken for Lecture 5");
+  const html = answerHtml("Keep one factor [Slides: Lecture 5 slides, p. 12]. Not given [Slides: Other, p. 1].", [slide]);
+  assert.match(html, /<button[^>]*data-source="0"[^>]*>/);
+  assert.equal((html.match(/<button/g) || []).length, 1);
+  assert.equal(safeUrl(slide.url), slide.url);
+  for (const bad of ["https://canvas.ucsd.edu/courses/1/files/7/download", "https://canvas.ucsd.edu/login", "https://canvas.ucsd.edu.evil.example/courses/1/files/7", "https://canvas.ucsd.edu/courses/1/files/7?verifier=x"]) {
+    assert.equal(safeUrl(bad), null, bad);
+  }
+});

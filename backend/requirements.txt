@@ -12,3 +12,7 @@ pgvector==0.5.1
 pytest>=8
 jsonschema>=4.22
 ruff>=0.6
+
+# slides: text from PDF and PowerPoint files
+pypdf>=5
+python-pptx>=1.0

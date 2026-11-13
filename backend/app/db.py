@@ -46,6 +46,7 @@ from .config import settings
 from .schemas import (
     CourseDetail,
     CourseSummary,
+    DocumentInfo,
     LectureInfo,
     LectureStatus,
     SyncPayload,
@@ -151,6 +152,29 @@ class Chunk(Base):
     entry_id: Mapped[str] = mapped_column(ForeignKey("lectures.entry_id", ondelete="CASCADE"))
     start_sec: Mapped[float] = mapped_column(Float)
     end_sec: Mapped[float] = mapped_column(Float)
+    text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    doc_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    version: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(Text)
+    pages: Mapped[int] = mapped_column(Integer)
+    lecture_no: Mapped[int | None] = mapped_column(Integer)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DocChunk(Base):
+    __tablename__ = "doc_chunks"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    doc_id: Mapped[str] = mapped_column(ForeignKey("documents.doc_id", ondelete="CASCADE"))
+    page: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
@@ -565,6 +589,132 @@ class ChunkHit:
     end_sec: float
     text: str
     distance: float  # cosine distance to the question; smaller is closer
+    # Set for a page of a document (slides). Then entry_id is the doc_id, lecture_title the
+    # document's name, media_url its link, and start_sec = end_sec = the page number.
+    page: int | None = None
+
+
+# --- documents (slides) ---
+
+
+def save_document(
+    course_id: str,
+    doc_id: str,
+    *,
+    source: str,
+    name: str,
+    url: str,
+    version: str,
+    content_hash: str,
+    pages: int,
+    chunks: list[tuple[int, str]],
+    lecture_no: int | None = None,
+) -> None:
+    """Store a document and replace its chunks (without embeddings) in one transaction. A
+    doc_id that belongs to another course is refused with ValueRejected."""
+    ensure_schema()
+    values = {
+        "course_id": course_id,
+        "source": source,
+        "name": name,
+        "url": url,
+        "version": version,
+        "content_hash": content_hash,
+        "pages": pages,
+        "lecture_no": lecture_no,
+        "synced_at": datetime.now(UTC),
+    }
+    try:
+        with Session(engine) as session, session.begin():
+            owner = session.execute(
+                select(Document.course_id).where(Document.doc_id == doc_id).with_for_update()
+            ).scalar_one_or_none()
+            if owner is not None and owner != course_id:
+                raise ValueRejected
+            stmt = insert(Document).values(doc_id=doc_id, **values)
+            session.execute(stmt.on_conflict_do_update(index_elements=["doc_id"], set_=values))
+            session.execute(delete(DocChunk).where(DocChunk.doc_id == doc_id))
+            if chunks:
+                session.execute(
+                    insert(DocChunk),
+                    [{"doc_id": doc_id, "page": page, "text": text_} for page, text_ in chunks],
+                )
+    except DataError:
+        raise ValueRejected from None
+
+
+def list_documents(course_id: str) -> list[DocumentInfo]:
+    """The course's documents, by name. `indexed` is true when every chunk has its embedding."""
+    ensure_schema()
+    pending = (
+        exists().where(DocChunk.doc_id == Document.doc_id, DocChunk.embedding.is_(None))
+    ).label("pending")
+    stmt = (
+        select(Document, pending)
+        .where(Document.course_id == course_id)
+        .order_by(Document.name, Document.doc_id)
+    )
+    with Session(engine) as session:
+        return [
+            DocumentInfo(
+                doc_id=d.doc_id,
+                source=d.source,
+                name=d.name,
+                url=d.url,
+                pages=d.pages,
+                version=d.version,
+                lecture_no=d.lecture_no,
+                indexed=not is_pending,
+            )
+            for d, is_pending in session.execute(stmt).all()
+        ]
+
+
+def doc_chunks_without_embedding(doc_id: str, limit: int) -> list[tuple[int, str]]:
+    stmt = (
+        select(DocChunk.id, DocChunk.text)
+        .where(DocChunk.doc_id == doc_id, DocChunk.embedding.is_(None))
+        .order_by(DocChunk.id)
+        .limit(limit)
+    )
+    with Session(engine) as session:
+        return [(r[0], r[1]) for r in session.execute(stmt).all()]
+
+
+def set_doc_embeddings(rows: list[tuple[int, list[float]]]) -> None:
+    with Session(engine) as session, session.begin():
+        for chunk_id, vector in rows:
+            session.execute(
+                update(DocChunk).where(DocChunk.id == chunk_id).values(embedding=vector)
+            )
+
+
+def search_doc_chunks(course_id: str, query_vector: list[float], limit: int) -> list[ChunkHit]:
+    """The `limit` document chunks of one course closest to the vector, closest first. An exact
+    scan: a course has a few thousand slide chunks at most, far fewer than caption chunks."""
+    ensure_schema()
+    distance = DocChunk.embedding.cosine_distance(query_vector).label("distance")
+    stmt = (
+        select(
+            Document.doc_id,
+            Document.name,
+            Document.url,
+            DocChunk.page,
+            DocChunk.text,
+            distance,
+        )
+        .join(Document, Document.doc_id == DocChunk.doc_id)
+        .where(Document.course_id == course_id, DocChunk.embedding.is_not(None))
+        .order_by(distance)
+        .limit(limit)
+    )
+    with Session(engine) as session, session.begin():
+        session.execute(text("SELECT set_config('enable_indexscan', 'off', true)"))
+        rows = session.execute(stmt).all()
+    return [
+        ChunkHit(doc_id, name, None, url, float(page), float(page), text_, dist, page=page)
+        for doc_id, name, url, page, text_, dist in rows
+    ]
 
 
 def lecture_chunks(entry_id: str) -> list[ChunkHit]:

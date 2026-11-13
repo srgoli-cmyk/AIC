@@ -10,6 +10,7 @@ const STAGES = {
   lectures: "Listing lectures",
   captions: "Reading captions",
   sending: "Sending to the backend",
+  slides: "Reading slides",
 };
 
 /** "MATH 018" from Canvas codes like "MATH018_FA26_001"; other codes as they are. */

@@ -76,6 +76,27 @@ Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.
 - `404`: the course is not synced. A synced course with nothing indexed yet returns `200` with an answer saying so and empty `sources`, once a key is configured.
 
+## Course documents (slides)
+PDF and PowerPoint files of a course. The extension downloads each one from Canvas and sends it here; the backend reads its text page by page, and `/ask` then searches the pages with the lectures.
+
+### GET /courses/{course_id}/documents
+Response `200`, ordered by name:
+```json
+[{"doc_id": "canvas-file-7", "source": "canvas", "name": "Week 3", "url": "https://canvas.ucsd.edu/courses/999999/files/7",
+  "pages": 24, "version": "184223:2026-10-01T00:00:00Z", "lecture_no": null, "indexed": true}]
+```
+`version` is the value the sender gave; a sender skips a file whose version is unchanged. `indexed` is true once every page is searchable. `404`: the course is not synced.
+
+### PUT /courses/{course_id}/documents/canvas/{canvas_file_id}?name=<file name>&version=<version>
+The body is the file itself (raw bytes, at most 40 MB). Only a real PDF or `.pptx` is read, judged by its first bytes, not by its name or `Content-Type`. Sending the same file id again replaces its pages.
+
+Response `200`: `{"doc_id": "canvas-file-7", "pages": 24, "chunks": 26, "status": "stored"}`.
+- `name` is shown without its extension and without square brackets. `url` is built by the backend from the two ids, never taken from the request.
+- `404`: the course is not synced. `413`: over 40 MB. `422 {"detail": "file could not be read"}`: not a PDF or PowerPoint, or it has no text (scanned pages). `422` also when the file id belongs to another course.
+
+### Slides in /ask
+A page of a document is cited as `[Slides: <name>, p. <page>]`. Its entry in `sources` has `"kind": "slides"`, `"page"`, `"timestamp": "p. <page>"`, `lecture_title` = the document's name, `entry_id` = its `doc_id`, `start_sec` = `end_sec` = the page number, and `url` = the file's page on Canvas. Lecture sources have `"kind": "lecture"` and `"page": null`. A question about one lecture (`entry_id` in the request) does not search slides.
+
 ## POST /study
 A lesson, flashcards or practice problems written from one lecture's captions.
 

@@ -8,14 +8,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, db, ingest, study
+from . import answer, db, ingest, slides, study
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -23,6 +24,8 @@ from .schemas import (
     CardsResponse,
     CourseDetail,
     CourseSummary,
+    DocumentInfo,
+    DocumentStored,
     LectureStatus,
     LessonResponse,
     PracticeResponse,
@@ -65,7 +68,7 @@ app = FastAPI(title="AI Lecture Search", version="0.0.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=settings.cors_origin_regex,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type"],
 )
 
@@ -170,6 +173,63 @@ def ask(req: AskRequest) -> AskResponse:
     if req.entry_id is None:
         return answer.answer_question(req.course_id, req.question, req.top_k)
     return answer.answer_question(req.course_id, req.question, req.top_k, entry_id=req.entry_id)
+
+
+@app.get("/courses/{course_id}/documents", response_model=list[DocumentInfo])
+def course_documents(course_id: str) -> list[DocumentInfo]:
+    if not db.course_exists(course_id):
+        raise HTTPException(status_code=404, detail="course not synced")
+    return db.list_documents(course_id)
+
+
+@app.put("/courses/{course_id}/documents/canvas/{canvas_file_id}", response_model=DocumentStored)
+async def put_canvas_document(
+    course_id: str,
+    canvas_file_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    name: str = Query(min_length=1, max_length=300),
+    version: str = Query(min_length=1, max_length=100),
+) -> DocumentStored:
+    """One Canvas file (a PDF or PowerPoint) as the raw request body. The extension sends each
+    slide deck here after a course sync; the text is read now and embedded in the background."""
+    if canvas_file_id < 1 or canvas_file_id > 2**53:
+        raise HTTPException(status_code=422, detail="invalid file id")
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > slides.MAX_BYTES:
+        raise HTTPException(status_code=413, detail="file too large")
+    data = bytearray()
+    async for part in request.stream():
+        data.extend(part)
+        if len(data) > slides.MAX_BYTES:
+            raise HTTPException(status_code=413, detail="file too large")
+    return await run_in_threadpool(
+        _store_canvas_document, course_id, canvas_file_id, name, version, bytes(data), background
+    )
+
+
+def _store_canvas_document(
+    course_id: str,
+    canvas_file_id: int,
+    name: str,
+    version: str,
+    data: bytes,
+    background: BackgroundTasks,
+) -> DocumentStored:
+    course = db.get_course(course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="course not synced")
+    doc_id = f"canvas-file-{canvas_file_id}"
+    # The link is built here from ids, never taken from the request.
+    url = f"https://canvas.ucsd.edu/courses/{course.canvas_course_id}/files/{canvas_file_id}"
+    try:
+        pages, chunks = slides.store(
+            course_id, doc_id, source="canvas", name=name, url=url, version=version, data=data
+        )
+    except slides.UnreadableDocument:
+        raise HTTPException(status_code=422, detail="file could not be read") from None
+    background.add_task(slides.embed_document, doc_id)
+    return DocumentStored(doc_id=doc_id, pages=pages, chunks=chunks, status="stored")
 
 
 @app.exception_handler(study.LectureNotIndexed)

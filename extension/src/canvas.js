@@ -110,6 +110,9 @@ export async function fetchFiles(fetchFn, courseId) {
     const file = { id: f.id, display_name: name };
     const type = clip(f["content-type"], 100);
     if (type) file["content-type"] = type;
+    // Size and modified time tell the slide sync whether a file changed (src/slides.js).
+    if (Number.isFinite(f.size) && f.size >= 0) file.size = f.size;
+    if (typeof f.modified_at === "string" && Number.isFinite(Date.parse(f.modified_at))) file.modified_at = f.modified_at.slice(0, 40);
     files.push(file);
     if (files.length >= MAX_FILES) break;
   }
