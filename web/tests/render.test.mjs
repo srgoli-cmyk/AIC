@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { answerHtml, renderMath, safeUrl, sourceLabel } from "../src/render.js";
+import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel } from "../src/render.js";
 
 const SOURCE = {
   lecture_title: "Lecture 8 - Product Rule [A00]",
@@ -216,4 +216,9 @@ test("a slide source is labelled and cited by document name and page", () => {
   for (const bad of ["https://canvas.ucsd.edu/courses/1/files/7/download", "https://canvas.ucsd.edu/login", "https://canvas.ucsd.edu.evil.example/courses/1/files/7", "https://canvas.ucsd.edu/courses/1/files/7?verifier=x"]) {
     assert.equal(safeUrl(bad), null, bad);
   }
+});
+
+test("a slide link off Canvas names the site it opens", () => {
+  assert.equal(slidesLinkText("https://canvas.ucsd.edu/courses/1/files/2"), "Open the slides ↗");
+  assert.equal(slidesLinkText("https://dsc10.com/lec11.pdf#page=3"), "Open on dsc10.com ↗");
 });

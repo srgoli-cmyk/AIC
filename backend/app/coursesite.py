@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
+import httpcore
 import httpx
 
 from . import db, slides
@@ -112,19 +113,44 @@ def new_client() -> httpx.Client:
         verify = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     except ImportError:
         pass
-    return httpx.Client(timeout=FETCH_TIMEOUT_SEC, follow_redirects=False, verify=verify)
+    transport = httpx.HTTPTransport(verify=verify)
+    # The name is looked up again when the connection is made, and the connection goes to the
+    # address that was checked then. A name that answers with a public address for the check
+    # and a private one for the connection (DNS rebinding) cannot reach the private one.
+    transport._pool._network_backend = _PublicOnlyBackend()  # noqa: SLF001 (httpcore has no public hook)
+    return httpx.Client(
+        timeout=FETCH_TIMEOUT_SEC, follow_redirects=False, verify=verify, transport=transport
+    )
 
 
-def _public_host(host: str) -> bool:
+def _public_ips(host: str, port: int = 443) -> list[str]:
+    """Every address the name resolves to, or [] if any of them is not a public address."""
     try:
-        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
-        return False
+        return []
+    ips = []
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
-            return False
-    return bool(infos)
+            return []
+        ips.append(str(ip))
+    return ips
+
+
+def _public_host(host: str) -> bool:
+    return bool(_public_ips(host))
+
+
+class _PublicOnlyBackend(httpcore.SyncBackend):
+    """Connects to an address checked at connect time. TLS still checks the certificate against
+    the name in the URL (httpcore takes the server name from the request, not from here)."""
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        ips = _public_ips(host, port)
+        if not ips:
+            raise httpcore.ConnectError("address is not public")
+        return super().connect_tcp(ips[0], port, timeout, local_address, socket_options)
 
 
 def checked_url(url: str) -> str:
@@ -285,7 +311,14 @@ def judge(facts: CourseFacts, url: str, title: str, text: str) -> Verdict:
         return v
     subject, number = sn
     code_re = re.compile(rf"\b{subject}[\s\-_]*0*{number}\b", re.IGNORECASE)
-    in_host_or_path = bool(re.search(rf"{subject}[\-_]?0*{number}(?![0-9a-z])", url, re.IGNORECASE))
+    parts = urlsplit(url)
+    in_host_or_path = bool(
+        re.search(
+            rf"(?<![0-9a-z]){subject}[\-_]?0*{number}(?![0-9a-z])",
+            f"{host}{parts.path}",
+            re.IGNORECASE,
+        )
+    )
     in_head = bool(code_re.search(head))
     if not (in_head or in_host_or_path):
         v.reasons.append(f"does not name {subject} {number} near the top")
@@ -307,7 +340,8 @@ def judge(facts: CourseFacts, url: str, title: str, text: str) -> Verdict:
         v.score = 0
         return v
 
-    ucsd = host.endswith("ucsd.edu") or bool(
+    on_ucsd = host == "ucsd.edu" or host.endswith(".ucsd.edu")
+    ucsd = on_ucsd or bool(
         re.search(r"UC San Diego|UCSD|University of California,? San Diego", text, re.IGNORECASE)
     )
     if ucsd:
@@ -341,18 +375,29 @@ def judge(facts: CourseFacts, url: str, title: str, text: str) -> Verdict:
         v.reasons.append("names none of the instructors")
 
     overlap = 0
+    dates_ok = False
     if wanted and facts.lecture_dates:
         overlap = len(_dates_in(text, wanted[1]) & set(facts.lecture_dates))
         share = overlap / len(set(facts.lecture_dates))
         if overlap >= 3 and share >= 0.5:
+            dates_ok = True
             v.score += 3
             v.reasons.append(
                 f"lists {overlap} of the {len(set(facts.lecture_dates))} lecture dates"
             )
 
+    # Words on a page are easy to copy. Off a ucsd.edu address the page is used without asking
+    # only when it also carries this term's real lecture calendar and an instructor's name;
+    # anything less is the student's call.
+    if on_ucsd:
+        sure = term_ok and (names or dates_ok or not facts.surnames)
+    else:
+        sure = term_ok and dates_ok and (names or not facts.surnames)
+        if term_ok and not sure:
+            v.reasons.append("not on a ucsd.edu address and the lecture calendar does not match")
     if not ucsd:
         v.decision = REJECT
-    elif term_ok and (names or overlap >= 3 or not facts.surnames):
+    elif sure:
         v.decision = ACCEPT
     elif term_ok or names or term_other:
         # Right course, but the term or the instructor is not confirmed: the student decides.
@@ -485,9 +530,16 @@ def lecture_number(*texts: str) -> int | None:
 
 
 def _same_site(href: str, root) -> bool:
+    """On the course site's host and inside its folder, compared by whole path segments, so
+    `/dsc10` does not take in `/dsc10-old` and `..` cannot climb out."""
     parts = urlsplit(href)
-    folder = root.path.rsplit("/", 1)[0] or "/"
-    return parts.hostname == root.hostname and parts.path.startswith(folder)
+    if (parts.hostname or "").lower() != (root.hostname or "").lower():
+        return False
+    segments = parts.path.split("/")
+    if ".." in segments or "%2e%2e" in parts.path.lower():
+        return False
+    folder = root.path.rsplit("/", 1)[0] + "/"
+    return folder == "/" or parts.path.startswith(folder)
 
 
 def lecture_materials(site_url: str, *, max_pages: int = MAX_SITE_PAGES) -> list[Material]:

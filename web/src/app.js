@@ -2,7 +2,7 @@ import "./look.js";
 import * as api from "./api.js";
 import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, schedule, sectionsOf, termRange, topic } from "./course.js";
 import { $, el } from "./dom.js";
-import { answerHtml, renderMath, safeUrl, sourceLabel, sourceUrl } from "./render.js";
+import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel, sourceUrl } from "./render.js";
 import { hideStudy, showStudy, STUDY } from "./study.js";
 
 const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask" };
@@ -319,7 +319,7 @@ function showSources(sources) {
           url ? { class: "source-head", href: url, target: "_blank", rel: "noopener noreferrer" } : { class: "source-head" },
           el("span", { class: "time" }, s.timestamp),
           el("span", { class: "source-title" }, s.kind === "slides" ? `Slides: ${s.lecture_title}` : sourceLabel(s).replace(/, [\d:]+$/, "")),
-          url ? el("span", { class: "open" }, s.kind === "slides" ? "Open the slides ↗" : "Play from here ↗") : null
+          url ? el("span", { class: "open" }, s.kind === "slides" ? slidesLinkText(url) : "Play from here ↗") : null
         ),
         el("p", {}, `“${s.snippet}”`)
       );

@@ -246,3 +246,56 @@ def test_a_pdf_on_the_web_opens_at_the_cited_page():
     assert answer.document_url("https://dsc10.com/lec03.html", 4) == "https://dsc10.com/lec03.html"
     canvas = "https://canvas.ucsd.edu/courses/1/files/7"
     assert answer.document_url(canvas, 4) == canvas
+
+
+# --- review fixes ---
+
+
+def test_the_client_connects_through_the_checking_backend():
+    with cs.new_client() as client:
+        assert isinstance(client._transport._pool._network_backend, cs._PublicOnlyBackend)
+
+
+def test_the_connection_goes_to_an_address_checked_at_connect_time(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        cs.httpcore.SyncBackend, "connect_tcp", lambda self, host, *a, **k: seen.append(host)
+    )
+    answer = {"ip": "93.184.216.34"}
+    monkeypatch.setattr(
+        cs.socket, "getaddrinfo", lambda h, p, **_: [(None, None, None, "", (answer["ip"], p))]
+    )
+    cs._PublicOnlyBackend().connect_tcp("dsc10.example", 443)
+    assert seen == ["93.184.216.34"], "connects to the checked address, not the name"
+    # The name now answers with a private address (DNS rebinding): no connection is made.
+    answer["ip"] = "127.0.0.1"
+    with pytest.raises(cs.httpcore.ConnectError):
+        cs._PublicOnlyBackend().connect_tcp("dsc10.example", 443)
+    assert seen == ["93.184.216.34"]
+
+
+def test_off_ucsd_a_page_needs_the_lecture_calendar_to_be_used_without_asking():
+    words = "DSC 10, Fall 2026 at UC San Diego. Instructors: Peter Chi, Janine Tiefenbruck."
+    assert judge(words).decision == cs.ASK
+    assert judge(words, url="https://dsc10.ucsd.edu/").decision == cs.ACCEPT
+    assert judge(f"{words} {SCHEDULE}").decision == cs.ACCEPT
+
+
+def test_the_course_code_counts_only_in_the_host_or_path():
+    v = cs.judge(DSC10, "https://x.ucsd.edu/?q=dsc10", "Home", "Fall 2026, UC San Diego, Peter Chi")
+    assert v.decision == cs.REJECT
+
+
+@pytest.mark.parametrize(
+    "href, ok",
+    [
+        ("https://site.example/dsc10/lec01.pdf", True),
+        ("https://SITE.example/dsc10/a/b.pdf", True),
+        ("https://site.example/dsc10-old/lec01.pdf", False),
+        ("https://site.example/dsc10/../admin/x.pdf", False),
+        ("https://other.example/dsc10/lec01.pdf", False),
+    ],
+)
+def test_same_site_compares_whole_folders(href, ok):
+    root = cs.urlsplit("https://site.example/dsc10/index.html")
+    assert cs._same_site(href, root) is ok

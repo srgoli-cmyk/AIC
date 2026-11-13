@@ -26,6 +26,13 @@ export function sourceUrl(source) {
   }
 }
 
+/** The words of a slide link. A file off Canvas names the site it opens, so the student sees
+ * where the link goes before clicking it. */
+export function slidesLinkText(url) {
+  const host = new URL(url).hostname;
+  return host === "canvas.ucsd.edu" ? "Open the slides ↗" : `Open on ${host} ↗`;
+}
+
 export function sourceLabel(source) {
   // A page of a document is cited as `Slides: <name>, p. <page>` (backend/app/answer.py).
   if (source.kind === "slides") return `Slides: ${source.lecture_title}, ${source.timestamp}`;
