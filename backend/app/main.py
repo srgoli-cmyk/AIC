@@ -266,8 +266,9 @@ def _sync_site_job(course_id: str, url: str) -> None:
                 db.update_site(course_id, url, "failed", {})
             with _site_jobs_lock:
                 site = db.get_site(course_id)
-                if site is None:
-                    # Forgotten mid-sync: a file stored after the forget must not stay behind.
+                if site is None or site.url != url:
+                    # Forgotten or replaced mid-sync: a file stored after that must not stay
+                    # behind. The new site's job has not stored anything yet.
                     db.delete_web_documents_except(course_id, set())
                 if site is None or site.url == url or site.status != "syncing":
                     _site_jobs.discard(course_id)

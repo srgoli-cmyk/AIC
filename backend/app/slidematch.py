@@ -22,6 +22,8 @@ MIN_VOTES = 3
 SHARE_OF_TOP = 0.5  # a part needs at least half the votes of the best part
 MAX_PARTS = 3
 MAX_CHARS = 24_000
+# A course with more slide pages than this is not matched (the scoring runs in the request).
+MAX_PAGES = 6_000
 
 # Exams, solutions and the syllabus are not the lecture's own slides.
 NOT_SLIDES = re.compile(
@@ -117,7 +119,7 @@ def _similarity(a: dict[str, float], b: dict[str, float]) -> float:
 
 def choose(pages: list[Page], captions: list[str]) -> list[Page]:
     """The pages of the parts the lecture talks about most, best part first."""
-    if not pages or not captions:
+    if not pages or not captions or len(pages) > MAX_PAGES:
         return []
     vectors, idf = _vectors([p.text for p in pages])
     votes: Counter = Counter()
@@ -152,7 +154,7 @@ def slide_pages_for(entry_id: str, lecture: list[db.ChunkHit]) -> list[db.ChunkH
     course_id = db.lecture_course(entry_id)
     if not course_id or not lecture:
         return []
-    pages = candidate_pages(db.course_pages(course_id), lecture[0].lecture_title)
+    pages = candidate_pages(db.course_pages(course_id, MAX_PAGES + 1), lecture[0].lecture_title)
     return [
         db.ChunkHit(
             p.doc_id, p.name, None, p.url, float(p.page), float(p.page), p.text, 0.0, p.page

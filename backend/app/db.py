@@ -886,7 +886,7 @@ def lecture_course(entry_id: str) -> str | None:
         return lecture.course_id if lecture else None
 
 
-def course_pages(course_id: str) -> list[tuple[str, str, str, int, str]]:
+def course_pages(course_id: str, limit: int = 6_001) -> list[tuple[str, str, str, int, str]]:
     """Every document chunk of a course as (doc_id, name, url, page, text), page by page."""
     ensure_schema()
     stmt = (
@@ -894,6 +894,7 @@ def course_pages(course_id: str) -> list[tuple[str, str, str, int, str]]:
         .join(Document, Document.doc_id == DocChunk.doc_id)
         .where(Document.course_id == course_id)
         .order_by(Document.doc_id, DocChunk.page, DocChunk.id)
+        .limit(limit)
     )
     with Session(engine) as session:
         return [tuple(row) for row in session.execute(stmt).all()]

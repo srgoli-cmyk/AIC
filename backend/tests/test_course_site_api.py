@@ -203,6 +203,17 @@ def test_a_site_chosen_during_a_sync_is_read_after_it(course, monkeypatch):
         read.append(url)
         if url == SITE:
             db.set_site(course_id, OLD, "Old", "student")  # the student picks another meanwhile
+            db.save_document(  # a file the old sync stored just after the switch
+                course_id,
+                cs.doc_id_for(url + "late.pdf"),
+                source="web",
+                name="Late",
+                url=url + "late.pdf",
+                version="v1",
+                content_hash="h",
+                pages=1,
+                chunks=[(1, "Stored just after the switch.")],
+            )
         progress(cs.SiteSync(found=1))
         return cs.SiteSync(found=1, stored=1)
 
@@ -211,3 +222,4 @@ def test_a_site_chosen_during_a_sync_is_read_after_it(course, monkeypatch):
     assert read == [SITE, OLD]
     site = client.get(f"/courses/{CID}/site").json()
     assert (site["url"], site["status"]) == (OLD, "done")
+    assert client.get(f"/courses/{CID}/documents").json() == []
