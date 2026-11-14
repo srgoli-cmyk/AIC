@@ -388,7 +388,14 @@ def _store_canvas_document(
     url = f"https://canvas.ucsd.edu/courses/{course.canvas_course_id}/files/{canvas_file_id}"
     try:
         pages, chunks = slides.store(
-            course_id, doc_id, source="canvas", name=name, url=url, version=version, data=data
+            course_id,
+            doc_id,
+            source="canvas",
+            name=name,
+            url=url,
+            version=version,
+            data=data,
+            ocr=True,  # a scanned PDF from Canvas is read by the vision model
         )
     except slides.UnreadableDocument:
         raise HTTPException(status_code=422, detail="file could not be read") from None

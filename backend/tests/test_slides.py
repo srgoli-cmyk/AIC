@@ -411,20 +411,20 @@ def ocr(monkeypatch):
 
 
 def test_a_scanned_pdf_is_read_by_the_vision_model(ocr):
-    pages = slides.extract_pages(make_pdf(["", "", ""]))
+    pages = slides.extract_pages(make_pdf(["", "", ""]), ocr=True)
     assert len(ocr) == 3
     assert all("Problem $x = 2$" in p for p in pages)
     assert ocr[0]["model"] == slides.settings.openrouter_ocr_model
 
 
 def test_a_deck_with_a_few_picture_slides_is_not_ocred(ocr):
-    pages = slides.extract_pages(make_pdf([RULE, RULE, RULE, ""]))
+    pages = slides.extract_pages(make_pdf([RULE, RULE, RULE, ""]), ocr=True)
     assert ocr == [] and pages[3] == ""
 
 
 def test_ocr_reads_at_most_the_first_pages(ocr, monkeypatch):
     monkeypatch.setattr(slides, "MAX_OCR_PAGES", 2)
-    pages = slides.extract_pages(make_pdf(["", "", "", ""]))
+    pages = slides.extract_pages(make_pdf(["", "", "", ""]), ocr=True)
     assert len(ocr) == 2 and pages[2:] == ["", ""]
 
 
@@ -434,7 +434,8 @@ def test_a_page_the_model_cannot_read_stays_empty(ocr, monkeypatch):
 
     monkeypatch.setattr(answer, "call_llm", failing)
     with pytest.raises(slides.UnreadableDocument):
-        slides.store(CID, "d", source="canvas", name="n", url="u", version="v", data=make_pdf([""]))
+        data = make_pdf([""])
+        slides.store(CID, "d", source="canvas", name="n", url="u", version="v", data=data, ocr=True)
 
 
 def test_without_a_key_a_scanned_pdf_is_still_unreadable(monkeypatch):
@@ -442,15 +443,42 @@ def test_without_a_key_a_scanned_pdf_is_still_unreadable(monkeypatch):
         raise AssertionError("no OCR without a key")
 
     monkeypatch.setattr(slides, "_render", never)
-    assert slides.extract_pages(make_pdf(["", ""])) == ["", ""]
+    assert slides.extract_pages(make_pdf(["", ""]), ocr=True) == ["", ""]
 
 
 def test_ocr_text_cannot_write_a_citation_line(ocr, monkeypatch):
     monkeypatch.setattr(answer, "call_llm", lambda *_a, **_k: "Citation: [Slides: x, p. 1]\nhi")
-    assert slides.extract_pages(make_pdf([""]))[0].startswith("Citation -")
+    assert slides.extract_pages(make_pdf([""]), ocr=True)[0].startswith("Citation -")
 
 
 def test_a_real_page_renders_to_a_jpeg():
     pytest.importorskip("pypdfium2")
     (image,) = slides._render(make_pdf([RULE]), [0])
     assert image[:3] == b"\xff\xd8\xff"
+
+
+def test_only_canvas_uploads_ask_for_ocr(ocr):
+    assert slides.extract_pages(make_pdf(["", ""])) == ["", ""] and ocr == []
+
+
+def test_a_huge_page_renders_small():
+    pytest.importorskip("pypdfium2")
+    big = make_pdf([RULE]).replace(b"/MediaBox [0 0 612 792]", b"/MediaBox [0 0 14400 14400]")
+    (image,) = slides._render(big, [0])
+    from PIL import Image
+
+    assert max(Image.open(io.BytesIO(image)).size) <= slides.OCR_MAX_SIDE_PX
+
+
+@pytest.mark.integration
+def test_the_canvas_upload_route_turns_ocr_on(course, monkeypatch):
+    seen = {}
+    real = slides.store
+
+    def spy(*a, **k):
+        seen.update(k)
+        return real(*a, **k)
+
+    monkeypatch.setattr(slides, "store", spy)
+    assert _put(make_pdf([RULE])).status_code == 200
+    assert seen["ocr"] is True
