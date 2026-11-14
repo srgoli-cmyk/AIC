@@ -52,8 +52,8 @@ export function afterSuccess(prev, summary, now) {
     failed: false,
     loginNeeded: false,
     unseen: (p.unseen | 0) + added,
-    // Kept by the podcast sync of all classes (every section), not by this course's Canvas page.
-    ...(p.via === "podcast" || summary.via === "podcast" ? { via: "podcast" } : {}),
+    // Kept by the sync of every class ("podcast" in older versions), not by this course alone.
+    ...([p.via, summary.via].some((v) => v === "all" || v === "podcast") ? { via: "all" } : {}),
   };
 }
 
@@ -64,7 +64,7 @@ export function afterFailure(prev, code, now) {
     ...prev,
     lastAttempt: now,
     failed: true,
-    loginNeeded: code === "CANVAS_LOGIN" || code === "NO_KAF_FRAME" || code === "PODCAST_LOGIN",
+    loginNeeded: code === "CANVAS_LOGIN" || code === "NO_KAF_FRAME",
   };
 }
 

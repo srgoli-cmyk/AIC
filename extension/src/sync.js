@@ -1,7 +1,7 @@
 // The sync orchestrator. Everything it touches is injected (fetch, tabs, scripting, clock), and
 // every step is sequential: one request or one injected call at a time.
 import { confirmBackend, getLectures, postSync } from "./backend.js";
-import { fetchModuleFiles, mergeFiles, slidesNote, syncSlides } from "./slides.js";
+import { fetchModuleFiles, isSlideFile, mergeFiles, slidesNote, syncSlides } from "./slides.js";
 import { fetchCourse, fetchFiles, fetchSections, findMediaGalleryUrl, isCanvasUrl, parseCourseId } from "./canvas.js";
 import {
   CATEGORY_POLL_MS,
@@ -191,8 +191,16 @@ export async function runSync(deps) {
   if (filesHidden && !files.length) notes.push("Course files could not be read, so none were synced.");
 
   report({ stage: "gallery", done: 0, total: 0 });
-  const galleryUrl = await findMediaGalleryUrl(fetchFn, courseId);
-  if (!isCanvasUrl(galleryUrl)) throw new SyncError("TAB_FAILED");
+  let galleryUrl = null;
+  try {
+    galleryUrl = await findMediaGalleryUrl(fetchFn, courseId);
+  } catch (e) {
+    // Syncing every class, a course without recordings still has its slides read.
+    if (!(deps.slidesOnlyOk && e instanceof SyncError && e.code === "NO_MEDIA_GALLERY")) throw e;
+  }
+  if (galleryUrl === null && !files.some(isSlideFile)) throw new SyncError("NOTHING_TO_SYNC");
+  if (galleryUrl !== null && !isCanvasUrl(galleryUrl)) throw new SyncError("TAB_FAILED");
+  if (galleryUrl === null) notes.push("No Media Gallery, so only slides were synced.");
 
   const entries = [];
   let todoCount = 0;
@@ -202,77 +210,79 @@ export async function runSync(deps) {
   let storedBefore = new Map();
   let tab;
   let categoryId; // the gallery the listed entries came from; set once the list is read
-  try {
+  if (galleryUrl !== null) {
     try {
-      tab = await tabs.create({ url: galleryUrl, active: false });
-    } catch {
-      throw new SyncError("TAB_FAILED");
-    }
-    if (!Number.isInteger(tab?.id)) throw new SyncError("TAB_FAILED");
-    await deps.tabOpened?.(tab.id);
-
-    let frame = await waitForCategory(deps, tab.id);
-    const gallery = await readGallery(deps, tab.id, frame);
-    frame = gallery.frame;
-    categoryId = CATEGORY_ID.test(String(frame.categoryId)) ? String(frame.categoryId) : undefined;
-    if (gallery.partial) notes.push(`The gallery list may be incomplete (${gallery.partial}).`);
-
-    storedBefore = new Map((await getLectures(fetchFn, backendUrl, courseId)).map((l) => [l.entry_id, l.has_captions]));
-    const wanted = gallery.entryIds.filter((id) => storedBefore.get(id) !== true);
-    todoCount = wanted.length;
-    // Only what fits in one sync is read, so nothing is downloaded and then dropped.
-    const todo = wanted.slice(0, MAX_LECTURES);
-    if (wanted.length > todo.length) {
-      notes.push(`${wanted.length - todo.length} lectures will be read on the next sync (${MAX_LECTURES} per sync).`);
-    }
-
-    let preferredLength = null;
-    let frameErrors = 0;
-    report({ stage: "captions", done: 0, total: todo.length });
-    for (const [i, id] of todo.entries()) {
-      let outcome;
       try {
-        const results = await runIn(
-          deps,
-          { tabId: tab.id, frameIds: [frame.frameId] },
-          readEntryCaptions,
-          [id, frame.categoryId, preferredLength, KS_PREFIX],
-          ENTRY_CALL_MS,
-        );
-        outcome = normalizeEntry(results[0]?.result, id);
+        tab = await tabs.create({ url: galleryUrl, active: false });
       } catch {
-        outcome = { ok: false, codes: ["FRAME_ERROR"] };
+        throw new SyncError("TAB_FAILED");
       }
-      processed++;
-      if (outcome.ok) {
-        frameErrors = 0;
-        entries.push(outcome.entry);
-        if (outcome.fromPage) titleFallbacks++;
-        if (outcome.ksLength) preferredLength = outcome.ksLength;
-      } else {
-        const [reason, ...details] = outcome.codes;
-        bump(skipped, reason);
-        if (reason === "NO_SESSION") noSession++;
-        for (const d of details) bump(skipped, d);
-        frameErrors = reason === "FRAME_ERROR" ? frameErrors + 1 : 0;
+      if (!Number.isInteger(tab?.id)) throw new SyncError("TAB_FAILED");
+      await deps.tabOpened?.(tab.id);
+
+      let frame = await waitForCategory(deps, tab.id);
+      const gallery = await readGallery(deps, tab.id, frame);
+      frame = gallery.frame;
+      categoryId = CATEGORY_ID.test(String(frame.categoryId)) ? String(frame.categoryId) : undefined;
+      if (gallery.partial) notes.push(`The gallery list may be incomplete (${gallery.partial}).`);
+
+      storedBefore = new Map((await getLectures(fetchFn, backendUrl, courseId)).map((l) => [l.entry_id, l.has_captions]));
+      const wanted = gallery.entryIds.filter((id) => storedBefore.get(id) !== true);
+      todoCount = wanted.length;
+      // Only what fits in one sync is read, so nothing is downloaded and then dropped.
+      const todo = wanted.slice(0, MAX_LECTURES);
+      if (wanted.length > todo.length) {
+        notes.push(`${wanted.length - todo.length} lectures will be read on the next sync (${MAX_LECTURES} per sync).`);
       }
-      report({ stage: "captions", done: i + 1, total: todo.length });
-      if (frameErrors >= MAX_FRAME_ERRORS_IN_ROW) {
-        notes.push("Stopped early: the Media Gallery page stopped responding.");
-        break;
+
+      let preferredLength = null;
+      let frameErrors = 0;
+      report({ stage: "captions", done: 0, total: todo.length });
+      for (const [i, id] of todo.entries()) {
+        let outcome;
+        try {
+          const results = await runIn(
+            deps,
+            { tabId: tab.id, frameIds: [frame.frameId] },
+            readEntryCaptions,
+            [id, frame.categoryId, preferredLength, KS_PREFIX],
+            ENTRY_CALL_MS,
+          );
+          outcome = normalizeEntry(results[0]?.result, id);
+        } catch {
+          outcome = { ok: false, codes: ["FRAME_ERROR"] };
+        }
+        processed++;
+        if (outcome.ok) {
+          frameErrors = 0;
+          entries.push(outcome.entry);
+          if (outcome.fromPage) titleFallbacks++;
+          if (outcome.ksLength) preferredLength = outcome.ksLength;
+        } else {
+          const [reason, ...details] = outcome.codes;
+          bump(skipped, reason);
+          if (reason === "NO_SESSION") noSession++;
+          for (const d of details) bump(skipped, d);
+          frameErrors = reason === "FRAME_ERROR" ? frameErrors + 1 : 0;
+        }
+        report({ stage: "captions", done: i + 1, total: todo.length });
+        if (frameErrors >= MAX_FRAME_ERRORS_IN_ROW) {
+          notes.push("Stopped early: the Media Gallery page stopped responding.");
+          break;
+        }
       }
-    }
-  } finally {
-    if (Number.isInteger(tab?.id)) {
-      try {
-        await tabs.remove(tab.id);
-      } catch {
-        // Already closed.
-      }
-      try {
-        await deps.tabClosed?.();
-      } catch {
-        // Nothing to forget.
+    } finally {
+      if (Number.isInteger(tab?.id)) {
+        try {
+          await tabs.remove(tab.id);
+        } catch {
+          // Already closed.
+        }
+        try {
+          await deps.tabClosed?.();
+        } catch {
+          // Nothing to forget.
+        }
       }
     }
   }
@@ -306,6 +316,8 @@ export async function runSync(deps) {
     courseId,
     code: course.course_code,
     lectures: storedCount,
+    added: entries.filter((e) => !storedBefore.has(e.id)).length,
+    slides: slideNote,
     pending: todoCount - entries.length,
     finishedAt: new Date(now()).toISOString(),
     notes,

@@ -9,7 +9,10 @@ import { MESSAGES, SyncError, messageFor } from "./errors.js";
 import { runSync } from "./sync.js";
 import { runAllSync } from "./syncAll.js";
 
-const STATE_KEYS = ["status", "stage", "done", "total", "courseId", "message", "mode", "scope"];
+const STATE_KEYS = ["status", "stage", "done", "total", "courseId", "message", "mode", "scope", "index", "count", "label"];
+// Courses kept up to date by syncing every class at once. "podcast" is the name older versions
+// stored; those records are treated the same.
+const isAll = (c) => c?.via === "all" || c?.via === "podcast";
 
 function cleanState(s) {
   const out = {};
@@ -57,10 +60,10 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
     }
   }
 
-  // The courses the last podcast sync covered, so a failed run can mark them all.
-  async function podcastCourseIds() {
+  // The courses the last sync of every class covered, so a failed run can mark them all.
+  async function allCourseIds() {
     return Object.entries(await readAuto())
-      .filter(([, c]) => c?.via === "podcast")
+      .filter(([, c]) => isAll(c))
       .map(([id]) => Number(id));
   }
 
@@ -95,9 +98,9 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         const covered = new Set(summary.courses.map((c) => c.courseId));
         const t = now();
         const book = await readAuto();
-        for (const c of summary.courses) book[c.courseId] = afterSuccess(book[c.courseId], { ...c, via: "podcast" }, t);
-        // A class that left My Podcasts still had its morning try.
-        for (const id of await podcastCourseIds()) if (!covered.has(id) && book[id]) book[id] = { ...book[id], lastAttempt: t };
+        for (const c of summary.courses) book[c.courseId] = afterSuccess(book[c.courseId], { ...c, via: "all" }, t);
+        // A class no longer synced (dropped, or the term ended) still had its morning try.
+        for (const id of await allCourseIds()) if (!covered.has(id) && book[id]) book[id] = { ...book[id], lastAttempt: t };
         await writeAuto(book);
       } else {
         await updateAuto(courseId, (prev) => afterSuccess(prev, summary, now()));
@@ -108,7 +111,7 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         const code = e instanceof SyncError ? e.code : "UNKNOWN";
         if (all) {
           const book = await readAuto();
-          for (const id of await podcastCourseIds()) {
+          for (const id of await allCourseIds()) {
             const next = afterFailure(book[id], code, now());
             if (next) book[id] = next;
           }
@@ -132,29 +135,29 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
   }
 
   /** Starts a sync nobody clicked for. False when one is already running. */
-  // A course kept by the podcast sync is updated by syncing every class at once.
+  // A course kept by the sync of every class is updated by syncing every class at once.
   function startAuto(courseId) {
     if (running || !Number.isSafeInteger(courseId) || courseId < 1) return false;
     running = true;
     void (async () => {
-      let viaPodcast = false;
+      let viaAll = false;
       try {
-        viaPodcast = (await readAuto())[courseId]?.via === "podcast";
+        viaAll = isAll((await readAuto())[courseId]);
       } catch {
-        // Treated as a Canvas course.
+        // Treated as a single course.
       }
-      if (viaPodcast) await run(null, null, { auto: true, all: true });
+      if (viaAll) await run(null, null, { auto: true, all: true });
       else await run(`${CANVAS_ORIGIN}/courses/${courseId}`, courseId, { auto: true });
     })();
     return true;
   }
 
   async function setAuto(msg) {
-    // { all: true } switches every class the podcast sync keeps.
+    // { all: true } switches every class the sync of every class keeps.
     if (msg?.all === true) {
       if (typeof msg.on !== "boolean") return { ok: false, error: "Bad request." };
       const book = await readAuto();
-      const ids = Object.keys(book).filter((id) => book[id]?.via === "podcast");
+      const ids = Object.keys(book).filter((id) => isAll(book[id]));
       for (const id of ids) book[id] = { ...book[id], on: msg.on, loginNeeded: false, failed: false };
       await writeAuto(book);
       return { ok: ids.length > 0, on: msg.on };

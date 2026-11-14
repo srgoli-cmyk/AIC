@@ -1,8 +1,8 @@
 # AI Lecture Search
 
-A Chrome extension copies your UCSD lecture captions and slides from Canvas (and podcast.ucsd.edu)
-into a database on your own computer. A web page then answers questions about the course, citing
-the lecture minute or slide page, and turns any lecture into a lesson, flashcards or practice
+A Chrome extension copies your UCSD lecture captions and slides from Canvas into a database on
+your own computer. A web page then answers questions about the course, citing the lecture minute
+or slide page, and turns any lecture into a lesson, flashcards or practice
 problems.
 
 Project board: https://miro.com/app/board/uXjVETB4KbI=/
@@ -47,8 +47,10 @@ You need macOS or Linux, Chrome, Docker Desktop, Python 3.11+, Node 20+ (tests o
    ```
 5. Load the extension: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**
    and pick the repo's `extension/` folder. If an older copy is loaded, turn it off.
-6. Open a course on canvas.ucsd.edu, click the extension, then **Sync this Canvas course** (or
-   **Sync all my classes**). Captions and slides are read in the background. **Keep updated** in
+6. Log in to canvas.ucsd.edu, click the extension, then **Sync all my classes**. It goes through
+   every active Canvas course one at a time: recordings from its Media Gallery, then its PDF and
+   PowerPoint files (a course with only slides still gets them). **Sync this Canvas course** does
+   just the course open in the tab. Captions and slides are read in the background. **Keep updated** in
    the popup re-syncs the course once a day.
 7. Open http://localhost:8000/app/, pick the course, and ask a question or pick a lecture and use
    **Teach me**, **Flashcards** or **Practice**.

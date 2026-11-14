@@ -87,6 +87,19 @@ test("no tab is opened when the course has no Media Gallery", async () => {
   assert.equal(tabs.state.created.length, 0);
 });
 
+test("syncing every class, a course without a Media Gallery still sends its slides", async () => {
+  const { deps, tabs, s } = setup({ server: { tabs: [] } });
+  const out = await runSync({ ...deps, slidesOnlyOk: true });
+  assert.equal(tabs.state.created.length, 0);
+  assert.deepEqual(s.opts.posted.lectures, []);
+  assert.ok(out.notes.includes("No Media Gallery, so only slides were synced."));
+});
+
+test("a course with no Media Gallery and no slide files is NOTHING_TO_SYNC", async () => {
+  const { deps } = setup({ server: { tabs: [], filePages: { 1: { items: [] } } } });
+  await assert.rejects(runSync({ ...deps, slidesOnlyOk: true }), /no Media Gallery and no slide files/);
+});
+
 test("a tab URL off Canvas is never opened", async () => {
   const { deps, tabs } = setup({ server: { tabs: [{ label: "Media Gallery", full_url: "https://evil.example/x" }] } });
   await assert.rejects(runSync(deps));

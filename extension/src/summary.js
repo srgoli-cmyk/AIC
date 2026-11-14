@@ -6,8 +6,6 @@ const STAGES = {
   files: "Reading course files",
   gallery: "Opening the Media Gallery",
   canvas: "Reading your Canvas courses",
-  classes: "Opening podcast.ucsd.edu",
-  lectures: "Listing lectures",
   captions: "Reading captions",
   sending: "Sending to the backend",
   slides: "Reading slides",
@@ -25,7 +23,8 @@ export function formatLastSync(last, format = (iso) => new Date(iso).toLocaleStr
     const lines = [];
     for (const c of Array.isArray(last.courses) ? last.courses : []) {
       const added = c.added > 0 ? ` (${c.added} new)` : "";
-      lines.push(`${displayCode(c.code) || `Course ${c.courseId}`}: ${c.lectures} lectures${added}`);
+      const slides = /^Slides: (\d+) /.exec(c.slides ?? "");
+      lines.push(`${displayCode(c.code) || `Course ${c.courseId}`}: ${c.lectures} lectures${added}${slides ? `, ${slides[1]} slide files` : ""}`);
     }
     lines.push(`${last.pending} pending captions, last synced ${format(last.finishedAt)}`);
     for (const note of Array.isArray(last.notes) ? last.notes : []) lines.push(note);
@@ -53,7 +52,9 @@ export function formatState(state, last, format) {
   if (state?.status === "running") {
     const stage = STAGES[state.stage] || "Syncing";
     const auto = state.mode === "auto" ? "Checking for new lectures. " : "";
-    lines.push(state.total ? `${auto}${stage}: ${state.done} of ${state.total}` : `${auto}${stage}...`);
+    // Syncing every class: which one, and how far through the list.
+    const which = state.count ? `${state.label ? displayCode(state.label) : "Class"} (${state.index} of ${state.count}). ` : "";
+    lines.push(state.total ? `${auto}${which}${stage}: ${state.done} of ${state.total}` : `${auto}${which}${stage}...`);
   } else if (state?.status === "error") {
     lines.push(`${state.mode === "auto" ? "Background sync" : "Sync"} failed: ${state.message}`);
   }
@@ -66,9 +67,7 @@ export function autoLine(c, format = (ms) => new Date(ms).toLocaleTimeString([],
   if (!c) return "";
   if (c.on !== true) return "Off. New lectures sync only when you click.";
   if (c.loginNeeded) {
-    return c.via === "podcast"
-      ? "Login expired. Log in to podcast.ucsd.edu, then click Sync."
-      : "Canvas login expired. Log in, then click Sync.";
+    return "Canvas login expired. Log in, then click Sync.";
   }
   if (c.failed) return "This morning's sync failed. Tries again tomorrow.";
   return c.lastSuccess ? `Syncs each morning. Last ${format(c.lastSuccess)}.` : "Syncs each morning.";

@@ -106,7 +106,7 @@ test("storage holds only counts, ids, timestamps and fixed text; no secrets", as
   assert.ok(!text.includes("Lecture 1_"), "no titles");
   assert.ok(!text.includes("http"), "no URLs");
   assert.deepEqual(Object.keys(store.syncState).sort(), ["courseId", "status"]);
-  assert.deepEqual(Object.keys(store.lastSync).sort(), ["code", "courseId", "finishedAt", "lectures", "notes", "pending", "skipped"]);
+  assert.deepEqual(Object.keys(store.lastSync).sort(), ["added", "code", "courseId", "finishedAt", "lectures", "notes", "pending", "skipped", "slides"]);
   for (const w of writes) for (const k of Object.keys(JSON.parse(w))) assert.ok(["syncState", "lastSync", "autoSync"].includes(k));
   assert.deepEqual(Object.keys(store.autoSync), [String(COURSE)]);
   assert.deepEqual(Object.keys(store.autoSync[COURSE]).sort(), ["code", "failed", "lastAttempt", "lastSuccess", "lectures", "loginNeeded", "on", "unseen"]);

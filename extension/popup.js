@@ -21,7 +21,7 @@ function render() {
   const id = current.lastSync?.courseId;
   // After a sync of every class, one switch keeps them all; the records share their state.
   const rec = all
-    ? Object.values(current[AUTO_KEY] || {}).find((c) => c?.via === "podcast")
+    ? Object.values(current[AUTO_KEY] || {}).find((c) => c?.via === "all" || c?.via === "podcast")
     : Number.isSafeInteger(id)
       ? current[AUTO_KEY]?.[id]
       : undefined;
