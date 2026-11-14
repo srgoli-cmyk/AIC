@@ -14,7 +14,7 @@ jsonschema>=4.22
 ruff>=0.6
 
 # slides: text from PDF and PowerPoint files
-pypdf>=5
+pypdf[crypto]>=5  # crypto: many course PDFs are AES-encrypted (no password)
 python-pptx>=1.0
 
 # course websites: reading pages, and certificates checked against the system store

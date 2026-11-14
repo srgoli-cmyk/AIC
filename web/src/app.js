@@ -74,8 +74,9 @@ function renderHome() {
         el(
           "span",
           { class: "card-meta" },
-          el("i", { class: c.indexed ? "ok" : "pending" }),
-          `${c.lectures} lecture${c.lectures === 1 ? "" : "s"}${c.indexed ? "" : " · indexing"}`
+          // A course with no recordings (slides only) has nothing to index.
+          el("i", { class: c.indexed || !c.lectures ? "ok" : "pending" }),
+          c.lectures ? `${c.lectures} lecture${c.lectures === 1 ? "" : "s"}${c.indexed ? "" : " · indexing"}` : "Slides only"
         ),
         el("span", { class: "card-arrow", "aria-hidden": "true" }, "→")
       )
@@ -109,7 +110,7 @@ function renderCourseHead() {
     const label = sec || only;
     if (sched) facts.push([label ? `Section ${label} meets` : "Usually meets", `${sched.days.join(" · ")}, ${sched.time}`]);
   }
-  facts.push(["Lectures", `${c.lectures.length}${c.indexed ? "" : " · indexing"}`]);
+  facts.push(["Lectures", c.lectures.length ? `${c.lectures.length}${c.indexed ? "" : " · indexing"}` : "None on Canvas"]);
   if (lecSecs.length) {
     facts.push([
       lecSecs.length > 1 ? "Lecture sections" : "Lecture section",
@@ -238,7 +239,9 @@ function renderScope() {
   if (!l) {
     $("scope").replaceChildren(
       el("h2", { class: "scope-title" }, "What are you stuck on?"),
-      el("p", { class: "scope-sub" }, `Ask about anything from all ${state.course.lectures.length} lectures, or pick one lecture to study it.`)
+      el("p", { class: "scope-sub" }, state.course.lectures.length
+          ? `Ask about anything from all ${state.course.lectures.length} lectures, or pick one lecture to study it.`
+          : "No recordings yet, so answers come from the course's slides.")
     );
     $("q").placeholder = "Ask about anything from class";
     return;
