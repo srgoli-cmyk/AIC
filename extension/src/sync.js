@@ -33,9 +33,7 @@ export function safeCode(code) {
 /** Validates what a frame returned for one entry. Only allowlisted fields survive. */
 export function normalizeEntry(raw, entryId, host = KAF_HOST) {
   if (!raw || typeof raw !== "object" || raw.host !== host) return { ok: false, codes: ["FRAME_ERROR"] };
-  // A podcast page names its own entry; a canvaskaf call was given one.
-  if (entryId == null) entryId = typeof raw.entryId === "string" && ENTRY_ID.test(raw.entryId) ? raw.entryId : null;
-  else if (raw.entryId !== undefined && raw.entryId !== entryId) return { ok: false, codes: ["FRAME_ERROR"] };
+  if (raw.entryId !== undefined && raw.entryId !== entryId) return { ok: false, codes: ["FRAME_ERROR"] };
   if (raw.ok !== true) {
     const failures = Array.isArray(raw.failures) ? raw.failures.slice(0, 6).map(safeCode) : [];
     return { ok: false, codes: [safeCode(raw.reason), ...failures], entryId };

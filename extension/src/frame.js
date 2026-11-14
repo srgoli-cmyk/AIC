@@ -78,11 +78,9 @@ export async function collectEntryIds(categoryId, maxPages) {
  * createdAt?, ksLength } or { host, ok: false, reason, failures?, entryId? }. Every code is plain
  * capitals, an HTTP status or a call name.
  *
- * On canvaskaf the page is /media/t/<entryId>/<categoryId>. On podcast.ucsd.edu, pagePath is the
- * lecture page (/watch/<term>/<section>/<n>) and the entry id is read from it; an id in skipIds
- * (already stored with captions) returns ALREADY_STORED before any Kaltura call.
+ * The lecture page is /media/t/<entryId>/<categoryId> on canvaskaf.
  */
-export async function readEntryCaptions(entryId, categoryId, preferredLength, ksPrefix, pagePath, skipIds) {
+export async function readEntryCaptions(entryId, categoryId, preferredLength, ksPrefix) {
   const host = location.hostname;
   const API = "https://cdnapisec.kaltura.com/api_v3/service/";
   const MAX_CANDIDATES = 6; // once a session length is known
@@ -100,11 +98,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
   }
 
   const ENTRY = /^[0-9]_[a-z0-9]{8}$/;
-  const PODCAST_PAGE = /^\/watch\/[a-z]{2}[0-9]{2}\/[a-z0-9]{2,12}_[0-9]{3}-[0-9]{3}-[a-z]{2}\/[0-9]{1,3}$/;
-  const podcast = pagePath !== undefined && pagePath !== null;
-  if (podcast) {
-    if (typeof pagePath !== "string" || !PODCAST_PAGE.test(pagePath)) return { host, ok: false, reason: "BAD_INPUT" };
-  } else if (!ENTRY.test(String(entryId)) || !/^\d{1,15}$/.test(String(categoryId))) {
+  if (!ENTRY.test(String(entryId)) || !/^\d{1,15}$/.test(String(categoryId))) {
     return { host, ok: false, reason: "BAD_INPUT" };
   }
   if (typeof ksPrefix !== "string" || !/^[A-Za-z0-9]{1,8}$/.test(ksPrefix)) {
@@ -184,7 +178,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
   function isLecturePage(url) {
     try {
       const u = new URL(url);
-      return u.hostname === host && u.pathname.startsWith(podcast ? "/watch/" : "/media/");
+      return u.hostname === host && u.pathname.startsWith("/media/");
     } catch {
       return false;
     }
@@ -192,7 +186,7 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
 
   let html;
   try {
-    const r = await fetch(podcast ? pagePath : `/media/t/${entryId}/${categoryId}`, {
+    const r = await fetch(`/media/t/${entryId}/${categoryId}`, {
       credentials: "include",
       signal: AbortSignal.timeout(25000),
     });
@@ -202,16 +196,6 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
     html = await r.text();
   } catch {
     return { host, ok: false, reason: "PAGE_FAILED" };
-  }
-
-  // A podcast page names its entry in the player call; other ids on the page are not this lecture.
-  if (podcast) {
-    const named =
-      html.match(/loadMedia\(\s*\{\s*entryId\s*:\s*['"]([0-9]_[a-z0-9]{8})['"]/)?.[1] ||
-      html.match(/['"]entry_id['"]\s*:\s*['"]([0-9]_[a-z0-9]{8})['"]/)?.[1];
-    if (!named) return { host, ok: false, reason: "NO_ENTRY" };
-    entryId = named;
-    if (Array.isArray(skipIds) && skipIds.includes(entryId)) return { host, ok: false, reason: "ALREADY_STORED", entryId };
   }
 
   // Lecture pages hold several strings shaped like a session; only some work.
@@ -252,11 +236,6 @@ export async function readEntryCaptions(entryId, categoryId, preferredLength, ks
     }
     const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
     let decoded = title ? decodeEntities(title).replace(/\s+/g, " ").trim() : "";
-    // Every podcast page of a section has the same <title>; the lecture label tells them apart.
-    if (podcast && decoded) {
-      const label = html.match(/Lecture \d{1,3},\s*\d{1,2}\/\d{1,2}\/\d{4}/)?.[0];
-      decoded = `${label || `Lecture ${pagePath.split("/").pop()}`} - ${decoded.replace(/\s*-\s*Course Podcasts.*$/, "")}`;
-    }
     // A title holding a long base64-like run could be a session: refuse it.
     if (!decoded || /[A-Za-z0-9+/=_-]{40,}/.test(decoded)) return finish({ host, ok: false, reason: "NO_TITLE" });
     result.title = decoded;

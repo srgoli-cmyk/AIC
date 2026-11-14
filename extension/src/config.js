@@ -6,8 +6,6 @@ export const WEB_PATH = "/app/";
 export const CANVAS_HOST = "canvas.ucsd.edu";
 export const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
 export const KAF_HOST = "canvaskaf.ucsd.edu";
-export const PODCAST_HOST = "podcast.ucsd.edu";
-export const PODCAST_ORIGIN = `https://${PODCAST_HOST}`;
 
 // First 4 characters of a Kaltura v2 session: base64 of "v2|". Nothing here reads a player, so this
 // is assumed rather than read from a page. If lecture pages show sessions with another start,
@@ -30,8 +28,6 @@ export const MAX_LECTURES = 200;
 export const CATEGORY_WAIT_MS = 30000;
 export const CATEGORY_POLL_MS = 1000;
 export const MAX_FRAME_ERRORS_IN_ROW = 3;
-// podcast.ucsd.edu: how long the tab may take to land on the site (a UCSD login can redirect).
-export const PODCAST_WAIT_MS = 30000;
 export const LIST_CALL_MS = 60000;
 
 // Time limits. Requests give up after FETCH_TIMEOUT_MS; the sync POST may carry many captions.

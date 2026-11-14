@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Lecture Sync (dev)",
   "version": "0.0.1",
-  "description": "Syncs lecture captions from Canvas and podcast.ucsd.edu to the local AI Lecture Search backend.",
+  "description": "Syncs lecture captions and slides from Canvas to the local AI Lecture Search backend.",
   "action": {
     "default_title": "Lecture Sync",
     "default_popup": "popup.html"
@@ -21,7 +21,6 @@
   "host_permissions": [
     "https://canvas.ucsd.edu/*",
     "https://canvaskaf.ucsd.edu/*",
-    "https://podcast.ucsd.edu/*",
     "https://cdnapisec.kaltura.com/*",
     "http://localhost:8000/*"
   ]
