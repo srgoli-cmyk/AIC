@@ -125,7 +125,12 @@ export async function findMediaGalleryUrl(fetchFn, courseId) {
   const tab = tabs.find((t) => typeof t?.label === "string" && t.label.trim().toLowerCase() === "media gallery");
   if (!tab) throw new SyncError("NO_MEDIA_GALLERY");
   if (!isCanvasUrl(tab.full_url)) throw new SyncError("TAB_FAILED", "not a Canvas URL");
-  return tab.full_url;
+  // Only the course's own external-tool page is opened (a course's tab list is set by its
+  // teachers), and it is rebuilt from its parts so no query or fragment rides along.
+  const u = new URL(tab.full_url);
+  const m = /^\/courses\/(\d{1,15})\/external_tools\/(\d{1,15})$/.exec(u.pathname);
+  if (!m || Number(m[1]) !== courseId || u.search || u.hash) throw new SyncError("TAB_FAILED", "not a gallery URL");
+  return `${CANVAS_ORIGIN}/courses/${courseId}/external_tools/${m[2]}`;
 }
 
 /** The student's active courses as { id, course_code } only. */

@@ -100,6 +100,19 @@ test("a course with no Media Gallery and no slide files is NOTHING_TO_SYNC", asy
   await assert.rejects(runSync({ ...deps, slidesOnlyOk: true }), /no Media Gallery and no slide files/);
 });
 
+test("a Media Gallery tab that is not this course's tool page is never opened", async () => {
+  for (const full_url of [
+    "https://canvas.ucsd.edu/courses/99999/external_tools/77",
+    "https://canvas.ucsd.edu/courses/12345/external_tools/77?x=1",
+    "https://canvas.ucsd.edu/courses/12345/files/7/download",
+    "https://canvas.ucsd.edu/logout",
+  ]) {
+    const { deps, tabs } = setup({ server: { tabs: [{ id: "t", label: "Media Gallery", full_url }] } });
+    await assert.rejects(runSync(deps), /Media Gallery tab/);
+    assert.equal(tabs.state.created.length, 0, full_url);
+  }
+});
+
 test("a tab URL off Canvas is never opened", async () => {
   const { deps, tabs } = setup({ server: { tabs: [{ label: "Media Gallery", full_url: "https://evil.example/x" }] } });
   await assert.rejects(runSync(deps));
