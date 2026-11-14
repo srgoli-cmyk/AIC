@@ -25,7 +25,7 @@ class Settings:
     openrouter_check_model: str = os.getenv("OPENROUTER_CHECK_MODEL", "openai/gpt-5.6-luna")
     # Reads scanned PDFs (pages that are pictures of text): a vision model that writes out each
     # page, math as LaTeX. Only used when a PDF has almost no text of its own.
-    openrouter_ocr_model: str = os.getenv("OPENROUTER_OCR_MODEL", "google/gemini-3.5-flash-lite")
+    openrouter_ocr_model: str = os.getenv("OPENROUTER_OCR_MODEL", "google/gemini-3.5-flash")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     embedding_dim: int = int(os.getenv("EMBEDDING_DIM", "384"))
     cors_origin_regex: str = os.getenv(
