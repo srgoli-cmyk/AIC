@@ -65,6 +65,7 @@ If the extension says it cannot reach the backend, `make start` is not running.
 | `OPENROUTER_MODEL` | Writes answers (default `openai/gpt-4o-mini`) |
 | `OPENROUTER_STUDY_MODEL` | Optional stronger model for the study tools |
 | `OPENROUTER_CHECK_MODEL` | Reasoning model that redoes the math in lessons and practice problems (default `openai/gpt-5.6-luna`) |
+| `OPENROUTER_OCR_MODEL` | Vision model that reads scanned PDFs, page images to text and LaTeX (default `google/gemini-3.5-flash-lite`). Only used when a PDF has almost no text |
 
 ## Working on it
 

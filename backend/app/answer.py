@@ -150,7 +150,7 @@ def build_messages(question: str, hits: list[db.ChunkHit]) -> list[dict[str, str
 
 
 def call_llm(
-    messages: list[dict[str, str]],
+    messages: list[dict],
     *,
     max_tokens: int = MAX_TOKENS,
     json_mode: bool = False,

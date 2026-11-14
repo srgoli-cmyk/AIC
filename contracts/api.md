@@ -92,7 +92,7 @@ The body is the file itself (raw bytes, at most 40 MB). Only a real PDF or `.ppt
 
 Response `200`: `{"doc_id": "canvas-file-7", "pages": 24, "chunks": 26, "status": "stored"}`.
 - `name` is shown without its extension (all of them: `Oct12.pdf.pdf` is `Oct12`), without a download copy number (`Week 3 (1).pdf` is `Week 3`) and without square brackets. Names stored before a rule changed are tidied when the backend starts. `url` is built by the backend from the two ids, never taken from the request.
-- `404`: the course is not synced. `413`: over 40 MB. `422 {"detail": "file could not be read"}`: not a PDF or PowerPoint, or it has no text (scanned pages). `422` also when the file id belongs to another course.
+- `404`: the course is not synced. `413`: over 40 MB. `422 {"detail": "file could not be read"}`: not a PDF or PowerPoint, or no text was found in it. A scanned PDF (at least 80% of its pages have no text) is read by the OCR vision model, up to its first 40 pages, before the reply; without an API key, or if OCR finds nothing, it is refused like this. `422` also when the file id belongs to another course.
 
 ### DELETE /courses/{course_id}/documents/canvas/{canvas_file_id}
 Removes one Canvas document and its pages. The extension calls it for an older copy of a deck when a newer one is posted (`Week 3.pdf` and `Week 3_1015.pdf`: the most recently modified is kept). Response `204`. `404`: the course has no such document (another course's document is never touched). `422`: invalid file id.

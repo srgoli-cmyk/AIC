@@ -388,3 +388,69 @@ def test_names_stored_before_the_rule_changed_are_tidied():
     assert db.rename_documents(slides.display_name) == 0
     names = [d["name"] for d in client.get(f"/courses/{CID}/documents").json()]
     assert "Oct12_filled" in names
+
+
+# --- scanned PDFs (OCR) ---
+
+
+@pytest.fixture
+def ocr(monkeypatch):
+    """A key is set, pages "render" to their index, and the vision model is faked."""
+    monkeypatch.setattr(slides, "settings", replace(slides.settings, openrouter_api_key=FAKE_KEY))
+    monkeypatch.setattr(slides, "_render", lambda _data, idx: [str(i).encode() for i in idx])
+    calls = []
+
+    def fake_call(messages, **kw):
+        calls.append(kw)
+        image = messages[0]["content"][1]["image_url"]["url"]
+        assert image.startswith("data:image/jpeg;base64,")
+        return f"Problem $x = 2$ read from page image {len(calls)}"
+
+    monkeypatch.setattr(answer, "call_llm", fake_call)
+    return calls
+
+
+def test_a_scanned_pdf_is_read_by_the_vision_model(ocr):
+    pages = slides.extract_pages(make_pdf(["", "", ""]))
+    assert len(ocr) == 3
+    assert all("Problem $x = 2$" in p for p in pages)
+    assert ocr[0]["model"] == slides.settings.openrouter_ocr_model
+
+
+def test_a_deck_with_a_few_picture_slides_is_not_ocred(ocr):
+    pages = slides.extract_pages(make_pdf([RULE, RULE, RULE, ""]))
+    assert ocr == [] and pages[3] == ""
+
+
+def test_ocr_reads_at_most_the_first_pages(ocr, monkeypatch):
+    monkeypatch.setattr(slides, "MAX_OCR_PAGES", 2)
+    pages = slides.extract_pages(make_pdf(["", "", "", ""]))
+    assert len(ocr) == 2 and pages[2:] == ["", ""]
+
+
+def test_a_page_the_model_cannot_read_stays_empty(ocr, monkeypatch):
+    def failing(messages, **kw):
+        raise answer.AnswerUnavailable
+
+    monkeypatch.setattr(answer, "call_llm", failing)
+    with pytest.raises(slides.UnreadableDocument):
+        slides.store(CID, "d", source="canvas", name="n", url="u", version="v", data=make_pdf([""]))
+
+
+def test_without_a_key_a_scanned_pdf_is_still_unreadable(monkeypatch):
+    def never(*_a, **_k):
+        raise AssertionError("no OCR without a key")
+
+    monkeypatch.setattr(slides, "_render", never)
+    assert slides.extract_pages(make_pdf(["", ""])) == ["", ""]
+
+
+def test_ocr_text_cannot_write_a_citation_line(ocr, monkeypatch):
+    monkeypatch.setattr(answer, "call_llm", lambda *_a, **_k: "Citation: [Slides: x, p. 1]\nhi")
+    assert slides.extract_pages(make_pdf([""]))[0].startswith("Citation -")
+
+
+def test_a_real_page_renders_to_a_jpeg():
+    pytest.importorskip("pypdfium2")
+    (image,) = slides._render(make_pdf([RULE]), [0])
+    assert image[:3] == b"\xff\xd8\xff"

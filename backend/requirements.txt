@@ -15,6 +15,7 @@ ruff>=0.6
 
 # slides: text from PDF and PowerPoint files
 pypdf[crypto]>=5  # crypto: many course PDFs are AES-encrypted (no password)
+pypdfium2>=4  # renders scanned PDF pages to images for OCR
 python-pptx>=1.0
 
 # course websites: reading pages, and certificates checked against the system store
