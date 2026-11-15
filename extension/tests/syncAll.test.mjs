@@ -89,6 +89,18 @@ test("one class failing does not stop the others", async () => {
   assert.match(out.notes[0], /^MATH 18 could not be synced: No captions could be read/);
 });
 
+test("an empty Media Gallery is listed with the courses that have nothing", async () => {
+  const out = await runAllSync(
+    deps(world(), async (d) => {
+      const id = Number(d.tabUrl.split("/").pop());
+      if (id === 78412) throw new SyncError("NO_ENTRIES");
+      return done(id);
+    }),
+  );
+  assert.ok(out.notes.some((n) => /^No recordings or slides: .*MATH 18/.test(n)));
+  assert.ok(!out.notes.some((n) => /could not be synced/.test(n)));
+});
+
 test("a Canvas login or backend problem stops the whole run", async () => {
   let calls = 0;
   const stop = (code) => async () => {

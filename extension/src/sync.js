@@ -130,6 +130,11 @@ async function readGallery(deps, tabId, frame) {
   return { entryIds, partial, frame };
 }
 
+/** The gallery loaded and lists nothing (not a failed or cut-short read). */
+export function isEmptyGallery(e) {
+  return e instanceof SyncError && e.code === "NO_ENTRIES" && !e.detail;
+}
+
 export function bump(map, key) {
   map[key] = (map[key] || 0) + 1;
 }
@@ -219,7 +224,15 @@ export async function runSync(deps) {
       await deps.tabOpened?.(tab.id);
 
       let frame = await waitForCategory(deps, tab.id);
-      const gallery = await readGallery(deps, tab.id, frame);
+      let gallery;
+      try {
+        gallery = await readGallery(deps, tab.id, frame);
+      } catch (e) {
+        // A gallery with nothing in it is like no gallery when the course has slides to read.
+        if (!(isEmptyGallery(e) && files.some(isSlideFile))) throw e;
+        notes.push("The Media Gallery is empty, so only slides were synced.");
+        gallery = { entryIds: [], partial: null, frame };
+      }
       frame = gallery.frame;
       categoryId = CATEGORY_ID.test(String(frame.categoryId)) ? String(frame.categoryId) : undefined;
       if (gallery.partial) notes.push(`The gallery list may be incomplete (${gallery.partial}).`);
@@ -285,9 +298,14 @@ export async function runSync(deps) {
     }
   }
 
-  // Nothing could be read although something was wanted: an empty sync would hide the problem.
+  // Nothing could be read although something was wanted. With no session on any page the setup
+  // is wrong, so stop. Otherwise stop only when the sync would send nothing at all; a course with
+  // stored lectures or slide files still has those refreshed, and the skip codes say why.
   if (todoCount > 0 && entries.length === 0) {
-    throw new SyncError(processed > 0 && noSession === processed ? "NO_SESSION_FOUND" : "NO_CAPTIONS_READ");
+    if (processed > 0 && noSession === processed) throw new SyncError("NO_SESSION_FOUND");
+    const hasCaptions = [...storedBefore.values()].some((v) => v === true);
+    if (!hasCaptions && !files.some(isSlideFile)) throw new SyncError("NO_CAPTIONS_READ");
+    notes.push(`No captions could be read for the ${todoCount} new lectures.`);
   }
   if (titleFallbacks) notes.push(`${titleFallbacks} lecture titles come from the page title and have no duration.`);
 

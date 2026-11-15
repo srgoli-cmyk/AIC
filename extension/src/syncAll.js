@@ -8,7 +8,7 @@ import { fetchMyCourses } from "./canvas.js";
 import { CANVAS_ORIGIN } from "./config.js";
 import { SyncError, messageFor } from "./errors.js";
 import { displayCode } from "./summary.js";
-import { courseError, runSync } from "./sync.js";
+import { courseError, isEmptyGallery, runSync } from "./sync.js";
 
 // Problems that would repeat for every course.
 const STOPS_ALL = new Set(["CANVAS_LOGIN", "BACKEND_DOWN", "BACKEND_OTHER", "BACKEND_REJECTED", "KS_IN_PAYLOAD"]);
@@ -55,7 +55,7 @@ export async function runAllSync(deps) {
     } catch (e) {
       const code = e instanceof SyncError ? e.code : "UNKNOWN";
       if (STOPS_ALL.has(code)) throw e;
-      if (code === "NOTHING_TO_SYNC" || code === "NO_MEDIA_GALLERY") empty.push(label);
+      if (code === "NOTHING_TO_SYNC" || code === "NO_MEDIA_GALLERY" || isEmptyGallery(e)) empty.push(label);
       else notes.push(`${label} could not be synced: ${messageFor(e)}`);
       lastError = e;
     }

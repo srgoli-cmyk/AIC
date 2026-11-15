@@ -352,10 +352,42 @@ test("safeCode drops anything that is not a plain code", () => {
 // ---- Review fixes
 
 test("nothing read although something was wanted: no POST, specific error", async () => {
-  const { deps, s, tabs } = setup({ kaf: { serve: () => "" } });
+  const { deps, s, tabs } = setup({ kaf: { serve: () => "" }, server: { filePages: { 1: { items: [] } } } });
   await assert.rejects(runSync(deps), (e) => e.message === "No captions could be read for any lecture, so nothing was sent.");
   assert.ok(!s.requests.some((r) => r.method === "POST"));
   assert.equal(tabs.state.open.size, 0);
+});
+
+test("no new captions read, but slides to send: the sync goes on with a note", async () => {
+  const { deps, s } = setup({ kaf: { serve: () => "" } });
+  const out = await runSync(deps);
+  assert.deepEqual(s.opts.posted.lectures, []);
+  assert.equal(out.pending, 3);
+  assert.ok(out.notes.includes("No captions could be read for the 3 new lectures."));
+  assert.equal(out.skipped.NO_CAPTIONS, 3);
+});
+
+test("no new captions read, no slides, but lectures already stored: the sync goes on", async () => {
+  const { deps, s } = setup({
+    kaf: { serve: () => "", galleryPages: [`/media/t/${A}/555 /media/t/1_dddddddd/555`] },
+    server: { filePages: { 1: { items: [] } }, stored: [A, B, C].map((entry_id) => ({ entry_id, has_captions: true })) },
+  });
+  const out = await runSync(deps);
+  assert.ok(s.requests.some((r) => r.method === "POST"));
+  assert.equal(out.pending, 1);
+});
+
+test("an empty gallery in a course with slides syncs the slides", async () => {
+  const { deps, s, tabs } = setup({ kaf: { galleryPages: [""] } });
+  const out = await runSync(deps);
+  assert.deepEqual(s.opts.posted.lectures, []);
+  assert.ok(out.notes.includes("The Media Gallery is empty, so only slides were synced."));
+  assert.equal(tabs.state.open.size, 0);
+});
+
+test("an empty gallery and no slides is still NO_ENTRIES", async () => {
+  const { deps } = setup({ kaf: { galleryPages: [""] }, server: { filePages: { 1: { items: [] } } } });
+  await assert.rejects(runSync(deps), (e) => e.code === "NO_ENTRIES" && !e.detail);
 });
 
 test("every lecture page without a session names the assumed prefix", async () => {
@@ -426,7 +458,9 @@ test("a stuck gallery call and a stuck entry call fail instead of hanging", asyn
   const t2 = tracker();
   const s2 = makeServer({ tracker: t2 });
   const entries = { ...baseDeps({ server: s2, scripting: makeScripting([{ frameId: 2, env: makeKaf().env, hang: (n) => n === "readEntryCaptions" }], t2) }), ...shortTimers };
-  await assert.rejects(runSync(entries), /No captions could be read/);
+  const out = await runSync(entries);
+  assert.deepEqual(s2.opts.posted.lectures, []);
+  assert.ok(out.notes.some((n) => /^No captions could be read/.test(n)));
 });
 
 test("every worker request carries a timeout signal", async () => {
