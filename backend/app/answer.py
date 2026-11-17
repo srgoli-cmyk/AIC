@@ -121,6 +121,12 @@ SYSTEM_PROMPT = (
     "Definitions and standard math facts used to connect steps may stay in ordinary "
     "sentences, uncited; only examples, scenarios and specific numbers need the labelled "
     "line.\n"
+    "- A formula is the exception to that last sentence. Lecturers often write a formula on "
+    'the board, so the captions only say "this way" or "the following" and the passage does '
+    "not contain the formula itself. Never cite a passage for a formula it does not contain. "
+    "Write such a formula on its own line that begins exactly with "
+    '"Example (not from the lecture):" and cite nothing there, or cite a slide page '
+    "([Slides: ...]) among the given passages if that page shows the formula.\n"
     "- Cite at most 3 citations in the whole answer, usually 2 or 3, each a distinct moment. "
     "Leave other statements uncited even when a passage supports them. Prefer the moment where "
     "the lecture starts explaining the point.\n"
