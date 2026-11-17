@@ -417,6 +417,27 @@ def test_a_scanned_pdf_is_read_by_the_vision_model(ocr):
     assert ocr[0]["model"] == slides.settings.openrouter_ocr_model
 
 
+def test_the_ocr_payload_has_no_reasoning_key_even_when_the_answer_model_has_one(monkeypatch):
+    import httpx  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        answer,
+        "settings",
+        replace(answer.settings, openrouter_api_key=FAKE_KEY, openrouter_reasoning="off"),
+    )
+    seen = {}
+
+    def handler(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "page text"}}]})
+
+    monkeypatch.setattr(
+        httpx.HTTPTransport, "handle_request", lambda self, request: handler(request)
+    )
+    assert slides._ocr_page(b"image") == "page text"
+    assert seen["model"] and "reasoning" not in seen
+
+
 def test_a_deck_with_a_few_picture_slides_is_not_ocred(ocr):
     pages = slides.extract_pages(make_pdf([RULE, RULE, RULE, ""]), ocr=True)
     assert ocr == [] and pages[3] == ""

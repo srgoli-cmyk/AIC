@@ -20,7 +20,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 
 from . import db, embeddings
-from .config import settings
+from .config import reasoning_payload, settings
 from .schemas import AskResponse, Source
 
 log = logging.getLogger("aic")
@@ -158,6 +158,14 @@ def build_messages(question: str, hits: list[db.ChunkHit]) -> list[dict[str, str
 # --- the model call (the one place that talks to the network) ---
 
 
+def _reasoning_for(reasoning: str | None, setting_name: str) -> dict | None:
+    """The `reasoning` payload value, or None for no key. None means the answer model's setting."""
+    if reasoning is None:
+        reasoning = settings.openrouter_reasoning
+        setting_name = "OPENROUTER_REASONING"
+    return reasoning_payload(reasoning, setting_name)
+
+
 def call_llm(
     messages: list[dict],
     *,
@@ -165,11 +173,14 @@ def call_llm(
     json_mode: bool = False,
     model: str | None = None,
     timeout: float = TIMEOUT_SEC,
+    reasoning: str | None = None,
+    reasoning_setting: str = "OPENROUTER_REASONING",
 ) -> str:
     """Send the chat to OpenRouter and return the reply text. Raises AnswerUnavailable for any
     failure; logs only the error type or HTTP status (and, on success, token count and latency).
     One attempt, no retries. The keyword options are for the study tools (app/study.py), whose
-    replies are longer and are JSON."""
+    replies are longer and are JSON. `reasoning` is a setting value ("", "off", an effort level);
+    None means OPENROUTER_REASONING. `reasoning_setting` is only the name used in a warning."""
     started = time.perf_counter()
     payload = {
         "model": model or settings.openrouter_model,
@@ -177,6 +188,9 @@ def call_llm(
         "temperature": TEMPERATURE,
         "max_tokens": max_tokens,
     }
+    reasoning_value = _reasoning_for(reasoning, reasoning_setting)
+    if reasoning_value is not None:
+        payload["reasoning"] = reasoning_value
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     try:
@@ -225,6 +239,7 @@ async def stream_llm(
     model: str | None = None,
     max_tokens: int = MAX_TOKENS,
     timeout: float = TIMEOUT_SEC,
+    reasoning: str | None = None,
 ) -> AsyncIterator[str]:
     """Like call_llm, but yields the reply piece by piece as OpenRouter sends it (server-sent
     events). Raises AnswerUnavailable for any failure, at any point. Logs error types or statuses,
@@ -239,6 +254,9 @@ async def stream_llm(
         "stream": True,
         "stream_options": {"include_usage": True},  # a last chunk with the token count
     }
+    reasoning_value = _reasoning_for(reasoning, "OPENROUTER_REASONING")
+    if reasoning_value is not None:
+        payload["reasoning"] = reasoning_value
     limits = httpx.Timeout(
         timeout, connect=STREAM_CONNECT_TIMEOUT_SEC, read=STREAM_READ_TIMEOUT_SEC
     )

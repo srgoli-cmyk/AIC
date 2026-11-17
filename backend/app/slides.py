@@ -192,6 +192,8 @@ def _ocr_page(image: bytes) -> str:
             model=settings.openrouter_ocr_model,
             max_tokens=OCR_MAX_TOKENS,
             timeout=OCR_TIMEOUT_SEC,
+            # Empty is the default: OPENROUTER_REASONING is for the answer model, not this one.
+            reasoning="",
         )
     except answer.AnswerUnavailable:
         return ""

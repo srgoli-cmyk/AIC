@@ -65,6 +65,7 @@ If the extension says it cannot reach the backend, `make start` is not running.
 | `OPENROUTER_MODEL` | Writes answers (default `openai/gpt-4o-mini`) |
 | `OPENROUTER_STUDY_MODEL` | Optional stronger model for the study tools |
 | `OPENROUTER_CHECK_MODEL` | Reasoning model that redoes the math in lessons and practice problems (default `openai/gpt-5.6-luna`) |
+| `OPENROUTER_REASONING`, `OPENROUTER_STUDY_REASONING`, `OPENROUTER_CHECK_REASONING` | Reasoning for the answer, study and check models: empty for the model's default, `off`, or `minimal` to `xhigh`. With the study model empty, the study tools follow `OPENROUTER_REASONING` |
 | `OPENROUTER_OCR_MODEL` | Vision model that reads scanned PDFs, page images to text and LaTeX (default `google/gemini-3.5-flash`). Only used for Canvas PDFs that have almost no text |
 
 ## Working on it

@@ -561,6 +561,41 @@ def test_math_without_dollars_is_marked_so_the_page_draws_it(raw, shown):
     assert study._rich(raw, 500) == shown
 
 
+def test_study_writer_and_check_use_their_own_reasoning_settings(lecture, monkeypatch):
+    monkeypatch.setattr(
+        study,
+        "settings",
+        replace(
+            study.settings,
+            openrouter_study_model="x/y",
+            openrouter_reasoning="high",
+            openrouter_study_reasoning="off",
+            openrouter_check_reasoning="low",
+        ),
+    )
+    llm = lecture(_lesson_with(("Solve $x = 1$.", "$1$")), {"problems": []})
+    _study("teach")
+    assert [c[1]["reasoning"] for c in llm.calls] == ["off", "low"]
+
+
+def test_the_writer_follows_the_answer_setting_when_there_is_no_study_model(lecture, monkeypatch):
+    monkeypatch.setattr(
+        study,
+        "settings",
+        replace(
+            study.settings,
+            openrouter_study_model="",
+            openrouter_reasoning="off",
+            openrouter_study_reasoning="high",  # ignored: the writer is OPENROUTER_MODEL
+            openrouter_check_reasoning="",
+        ),
+    )
+    llm = lecture(_lesson_with(("Solve $x = 1$.", "$1$")), {"problems": []})
+    _study("teach")
+    # The check's own empty setting stays the default; it does not fall back to anything.
+    assert [c[1]["reasoning"] for c in llm.calls] == ["off", ""]
+
+
 def test_the_checks_use_the_check_model(lecture, monkeypatch):
     monkeypatch.setattr(
         study, "settings", replace(study.settings, openrouter_check_model="r/reasoner")

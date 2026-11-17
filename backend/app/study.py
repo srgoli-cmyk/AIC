@@ -505,13 +505,22 @@ def _call(messages: list[dict[str, str]], max_tokens: int, *, check: bool = Fals
             json_mode=True,
             model=settings.openrouter_check_model or settings.openrouter_study_model or None,
             timeout=CHECK_TIMEOUT_SEC,
+            reasoning=settings.openrouter_check_reasoning,
+            reasoning_setting="OPENROUTER_CHECK_REASONING",
         )
+    # With no study model the writer is OPENROUTER_MODEL, so it follows OPENROUTER_REASONING.
+    if settings.openrouter_study_model:
+        reasoning, name = settings.openrouter_study_reasoning, "OPENROUTER_STUDY_REASONING"
+    else:
+        reasoning, name = settings.openrouter_reasoning, "OPENROUTER_REASONING"
     return answer.call_llm(
         messages,
         max_tokens=max_tokens,
         json_mode=True,
         model=settings.openrouter_study_model or None,
         timeout=TIMEOUT_SEC,
+        reasoning=reasoning,
+        reasoning_setting=name,
     )
 
 
