@@ -5,11 +5,16 @@ Nothing here logs the question, the prompt, the model's reply or the API key. Fa
 as an error type or an HTTP status only.
 """
 
+import asyncio
+import json
 import logging
 import math
 import re
 import secrets
 import time
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -26,6 +31,10 @@ TEMPERATURE = 0.1
 # this caps cost and stops a runaway reply. A reply that hits the cap is cut off (and logged).
 MAX_TOKENS = 1024
 TIMEOUT_SEC = 60.0
+# Streaming: TIMEOUT_SEC is the deadline for the whole reply; these catch a stalled connection
+# sooner (a read timeout is the longest silence allowed between two chunks).
+STREAM_CONNECT_TIMEOUT_SEC = 10.0
+STREAM_READ_TIMEOUT_SEC = 30.0
 SNIPPET_CHARS = 300
 NOTHING_INDEXED = "Nothing from this course has been indexed yet. Please try again in a minute."
 # Used for any reply that has no valid citation, including a reply that only has text.
@@ -210,6 +219,115 @@ def call_llm(
     return content.strip()
 
 
+async def stream_llm(
+    messages: list[dict],
+    *,
+    model: str | None = None,
+    max_tokens: int = MAX_TOKENS,
+    timeout: float = TIMEOUT_SEC,
+) -> AsyncIterator[str]:
+    """Like call_llm, but yields the reply piece by piece as OpenRouter sends it (server-sent
+    events). Raises AnswerUnavailable for any failure, at any point. Logs error types or statuses,
+    and at the end numbers only; never any text. Closing the generator (or cancelling it) closes
+    the upstream response, because the response is held by `async with`."""
+    started = time.perf_counter()
+    payload = {
+        "model": model or settings.openrouter_model,
+        "messages": messages,
+        "temperature": TEMPERATURE,
+        "max_tokens": max_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},  # a last chunk with the token count
+    }
+    limits = httpx.Timeout(
+        timeout, connect=STREAM_CONNECT_TIMEOUT_SEC, read=STREAM_READ_TIMEOUT_SEC
+    )
+    tokens: Any = "unknown"
+    first_token_ms: int | None = None
+    finish_reason = None
+    received = False
+    try:
+        # Total deadline for the whole call. It is applied to each upstream await separately
+        # (timeout_at), never around a `yield`: a deadline that fires while this generator is
+        # paused at `yield` would cancel the consumer's task instead of ours (PEP 789).
+        deadline = asyncio.get_running_loop().time() + timeout
+        async with AsyncExitStack() as stack:  # closes the response and the client on any exit
+            async with asyncio.timeout_at(deadline):
+                http = await stack.enter_async_context(httpx.AsyncClient(timeout=limits))
+                response = await stack.enter_async_context(
+                    http.stream(
+                        "POST",
+                        OPENROUTER_URL,
+                        headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+                        json=payload,
+                    )
+                )
+            if response.status_code != 200:
+                log.error("answer service returned status %d", response.status_code)
+                raise AnswerUnavailable
+            lines = response.aiter_lines()
+            while True:
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        line = await anext(lines)
+                except StopAsyncIteration:
+                    break
+                # Blank lines separate events; lines starting with ":" are keep-alive comments.
+                if not line or line.startswith(":"):
+                    continue
+                field, _, data = line.partition(":")
+                if field != "data":
+                    continue
+                data = data.strip()
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                if chunk.get("error"):
+                    # An error after the stream started. Its message is not logged.
+                    log.error("answer service sent an error mid-stream")
+                    raise AnswerUnavailable
+                usage = chunk.get("usage")
+                if isinstance(usage, dict):
+                    count = usage.get("completion_tokens")
+                    if isinstance(count, int) and not isinstance(count, bool):
+                        tokens = count
+                for choice in chunk.get("choices") or []:
+                    finish_reason = choice.get("finish_reason") or finish_reason
+                    text = (choice.get("delta") or {}).get("content")
+                    if not isinstance(text, str) or not text:
+                        continue
+                    # A lone surrogate cannot be encoded for the response or the logs.
+                    text.encode("utf-8")
+                    if first_token_ms is None:
+                        first_token_ms = round((time.perf_counter() - started) * 1000)
+                    received = True
+                    yield text
+    except AnswerUnavailable:
+        raise
+    except TimeoutError:
+        log.error("answer service call failed: timeout")
+        raise AnswerUnavailable from None
+    except (httpx.HTTPError, UnicodeError) as exc:
+        log.error("answer service call failed: %s", type(exc).__name__)
+        raise AnswerUnavailable from None
+    except (ValueError, AttributeError, TypeError, RecursionError) as exc:
+        # json.loads failed (JSONDecodeError is a ValueError) or a chunk had an odd shape.
+        log.error("answer service returned an unusable body (%s)", type(exc).__name__)
+        raise AnswerUnavailable from None
+    if not received:
+        log.error("answer service returned an unusable body (empty reply)")
+        raise AnswerUnavailable
+    latency_ms = round((time.perf_counter() - started) * 1000)
+    log.info(
+        "answer stream tokens=%s first_token_ms=%d latency_ms=%d",
+        tokens,
+        first_token_ms or 0,
+        latency_ms,
+    )
+    if finish_reason == "length":
+        log.warning("answer was cut off at the token limit")
+
+
 # --- citations ---
 
 _BRACKETS = re.compile(r"\[([^\[\]]*)\]|\(([^()]*)\)")
@@ -376,10 +494,12 @@ def to_source(hit: db.ChunkHit) -> Source:
 # --- entry point ---
 
 
-def answer_question(
+def prepare(
     course_id: str, question: str, top_k: int, entry_id: str | None = None
-) -> AskResponse:
-    """Raises AnswerNotConfigured, SearchUnavailable or AnswerUnavailable; main maps them."""
+) -> list[db.ChunkHit]:
+    """Everything before the model call: key check, embed, search, slides, dedupe. Returns the
+    passages to give the model (empty when nothing is indexed). Shared by /ask and /ask/stream.
+    Raises AnswerNotConfigured or SearchUnavailable; main maps them."""
     if not settings.openrouter_api_key:
         raise AnswerNotConfigured
     try:
@@ -397,12 +517,48 @@ def answer_question(
             hits = sorted([*hits, *slides], key=lambda h: h.distance)
     else:
         hits = db.search_chunks(course_id, query_vector, limit, entry_id=entry_id)
-    if not hits:
-        return AskResponse(answer=NOTHING_INDEXED, sources=[])
-    given = dedupe(hits, top_k)
-    reply = call_llm(build_messages(question, given))
+    return dedupe(hits, top_k) if hits else []
+
+
+def finish(reply: str, given: list[db.ChunkHit]) -> AskResponse:
+    """Check the citations in the model's reply and build the response. Shared by /ask and
+    /ask/stream, so both give the same answer for the same reply."""
     cited, cleaned = cited_hits(reply, given)
     if not cited:
         # No valid citation: whatever the model wrote is not grounded in the passages.
         return AskResponse(answer=NOT_COVERED, sources=[])
     return AskResponse(answer=cleaned.strip(), sources=[to_source(h) for h in cited])
+
+
+def answer_question(
+    course_id: str, question: str, top_k: int, entry_id: str | None = None
+) -> AskResponse:
+    """Raises AnswerNotConfigured, SearchUnavailable or AnswerUnavailable; main maps them."""
+    given = prepare(course_id, question, top_k, entry_id)
+    if not given:
+        return AskResponse(answer=NOTHING_INDEXED, sources=[])
+    return finish(call_llm(build_messages(question, given)), given)
+
+
+async def answer_events(
+    question: str, given: list[db.ChunkHit]
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """The events of /ask/stream after `prepare`: ("delta", {"text"}) as the model writes, then
+    ("final", AskResponse as a dict), or ("error", ...) if the model call fails. Closing this
+    generator closes the model call."""
+    if not given:
+        yield "final", AskResponse(answer=NOTHING_INDEXED, sources=[]).model_dump(mode="json")
+        return
+    parts: list[str] = []
+    deltas = stream_llm(build_messages(question, given))
+    try:
+        async for text in deltas:
+            parts.append(text)
+            yield "delta", {"text": text}
+    except AnswerUnavailable:
+        yield "error", {"status": 502, "detail": "answer service unavailable"}
+        return
+    finally:
+        await deltas.aclose()  # also when this generator is closed while a delta is pending
+    # Same as call_llm, which strips the reply.
+    yield "final", finish("".join(parts).strip(), given).model_dump(mode="json")

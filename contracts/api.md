@@ -76,6 +76,37 @@ Response `200`: see `fixtures/ask_response_sample.json`.
 - `sources` lists the passages the answer cites, most relevant first. Citations that match no passage are removed from `answer`, except that a bracket holding at least one valid citation is left whole. If no valid citation remains, `answer` is exactly `The lectures don't cover this.` and `sources` is empty.
 - `404`: the course is not synced. A synced course with nothing indexed yet returns `200` with an answer saying so and empty `sources`, once a key is configured.
 
+## POST /ask/stream
+The same question as `POST /ask`, answered word by word. Same body, same rules, and the final answer is
+exactly what `/ask` returns for the same model reply.
+
+Anything that fails before the model is called is a plain HTTP error, exactly as for `/ask`: `404`
+course not synced, `422` invalid body, and the `503`s below. Otherwise the response is `200` with
+`Content-Type: text/event-stream` (Server-Sent Events). Each event is an `event:` line, one `data:` line
+holding JSON, and a blank line:
+
+```
+event: delta
+data: {"text": "To find critical points"}
+
+event: delta
+data: {"text": ", differentiate first [Lecture 17, 6:50]."}
+
+event: final
+data: {"answer": "To find critical points, ...", "sources": [...]}
+```
+
+- `delta`: the next piece of the model's reply, as written. It is not checked yet, so it can hold a
+  citation that `final` removes. A client shows deltas as plain text only (no Markdown, math, links
+  or HTML) and replaces them with `final`.
+- `final`: once, last. The body `/ask` would return: citations checked, invalid ones removed, `The
+  lectures don't cover this.` when none is valid, and `sources`. A course with nothing indexed sends
+  only `final`.
+- `error`: once, last, instead of `final`, when the model call fails or times out after the stream
+  started: `{"status": 502, "detail": "answer service unavailable"}`, with the same message as `/ask`.
+- Lines starting with `:` are comments (keep-alives); a client ignores them.
+- Closing the connection stops the model call.
+
 ## Course documents (slides)
 PDF and PowerPoint files of a course. The extension downloads each one from Canvas and sends it here; the backend reads its text page by page, and `/ask` then searches the pages with the lectures.
 

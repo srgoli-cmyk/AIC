@@ -3,6 +3,7 @@ chunked and embedded in the background (app/ingest.py); /ask answers from the st
 (app/answer.py); /study writes a lesson, flashcards or practice problems from one lecture
 (app/study.py)."""
 
+import json
 import logging
 import re
 import threading
@@ -14,7 +15,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
@@ -192,6 +193,49 @@ def ask(req: AskRequest) -> AskResponse:
     if req.entry_id is None:
         return answer.answer_question(req.course_id, req.question, req.top_k)
     return answer.answer_question(req.course_id, req.question, req.top_k, entry_id=req.entry_id)
+
+
+def _sse_frame(event: str, data: dict) -> str:
+    # json.dumps escapes newlines, so the data is always one line.
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+class _ClosingStreamingResponse(StreamingResponse):
+    """On http.disconnect Starlette cancels its send task but never closes the body iterator, so
+    a generator paused at `yield` would stay open (and the model call with it) until garbage
+    collection. Close it here, deterministically, whatever way the response ends."""
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.body_iterator.aclose()  # type: ignore[attr-defined]
+
+
+@app.post("/ask/stream")
+async def ask_stream(req: AskRequest) -> StreamingResponse:
+    """Like /ask, but the answer arrives as server-sent events (see contracts/api.md). Read-only
+    like /ask, so no origin check. Failures before the model is called are plain HTTP errors."""
+    # The database and the embedding model are synchronous: run them off the event loop.
+    if not await run_in_threadpool(db.course_exists, req.course_id):
+        raise HTTPException(status_code=404, detail="course not synced")
+    given = await run_in_threadpool(
+        answer.prepare, req.course_id, req.question, req.top_k, req.entry_id
+    )
+    events = answer.answer_events(req.question, given)
+
+    async def frames() -> AsyncIterator[str]:
+        try:
+            async for event, data in events:
+                yield _sse_frame(event, data)
+        finally:
+            # Runs when the client disconnects (the generator is cancelled or closed): this stops
+            # the model call.
+            await events.aclose()
+
+    return _ClosingStreamingResponse(
+        frames(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/courses/{course_id}/documents", response_model=list[DocumentInfo])

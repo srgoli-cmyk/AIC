@@ -15,6 +15,10 @@ def blocked_request(self, request):
     raise NetworkBlocked(f"a test tried a real HTTP request to {request.url.host}")
 
 
+async def blocked_async_request(self, request):
+    raise NetworkBlocked(f"a test tried a real HTTP request to {request.url.host}")
+
+
 def _is_local(host) -> bool:
     if host in ("localhost", "", None):
         return True
@@ -47,5 +51,6 @@ def block_network(monkeypatch) -> None:
     """Block httpx, and sockets and DNS for any non-loopback address. Local Postgres still works
     (its driver does not use these Python sockets, and loopback is allowed anyway)."""
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", blocked_request)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", blocked_async_request)
     monkeypatch.setattr(socket.socket, "connect", _guard_connect(socket.socket.connect))
     monkeypatch.setattr(socket, "getaddrinfo", _guard_getaddrinfo(socket.getaddrinfo))
