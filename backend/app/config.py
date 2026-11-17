@@ -17,7 +17,7 @@ class Settings:
         default=os.getenv("DATABASE_URL", "postgresql://aic:aic@localhost:5432/aic"), repr=False
     )
     openrouter_api_key: str = field(default=os.getenv("OPENROUTER_API_KEY", ""), repr=False)
-    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "anthropic/claude-haiku-5.5")
     # Optional: a stronger model for the study tools only (lessons, flashcards, practice
     # problems). Empty uses openrouter_model.
     openrouter_study_model: str = os.getenv("OPENROUTER_STUDY_MODEL", "")
@@ -29,8 +29,10 @@ class Settings:
     openrouter_ocr_model: str = os.getenv("OPENROUTER_OCR_MODEL", "google/gemini-3.5-flash")
     # Reasoning per model: empty (default, send nothing), off, or an effort level; see
     # reasoning_payload. Reasoning models can spend the whole token limit thinking and come back
-    # cut off, so `off` is the usual fix for the answer model.
-    openrouter_reasoning: str = os.getenv("OPENROUTER_REASONING", "")  # OPENROUTER_MODEL
+    # cut off, so `off` is the usual fix for the answer model. The default is `off`; getenv only
+    # uses it when the variable is unset, so an explicit `OPENROUTER_REASONING=` stays empty
+    # (the model's default).
+    openrouter_reasoning: str = os.getenv("OPENROUTER_REASONING", "off")  # OPENROUTER_MODEL
     # The study writer. Empty here still means the default; the fallback to openrouter_reasoning
     # when OPENROUTER_STUDY_MODEL is empty is in study._call.
     openrouter_study_reasoning: str = os.getenv("OPENROUTER_STUDY_REASONING", "")

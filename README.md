@@ -62,7 +62,7 @@ If the extension says it cannot reach the backend, `make start` is not running.
 | Name | What it does |
 |---|---|
 | `OPENROUTER_API_KEY` | Required for answers and study tools |
-| `OPENROUTER_MODEL` | Writes answers (default `openai/gpt-4o-mini`) |
+| `OPENROUTER_MODEL` | Writes answers (default `anthropic/claude-haiku-5.5`, with `OPENROUTER_REASONING=off`) |
 | `OPENROUTER_STUDY_MODEL` | Optional stronger model for the study tools |
 | `OPENROUTER_CHECK_MODEL` | Reasoning model that redoes the math in lessons and practice problems (default `openai/gpt-5.6-luna`) |
 | `OPENROUTER_REASONING`, `OPENROUTER_STUDY_REASONING`, `OPENROUTER_CHECK_REASONING` | Reasoning for the answer, study and check models: empty for the model's default, `off`, or `minimal` to `xhigh`. With the study model empty, the study tools follow `OPENROUTER_REASONING` |
