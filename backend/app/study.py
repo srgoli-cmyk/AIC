@@ -251,12 +251,30 @@ def build_messages(kind: str, hits: list[db.ChunkHit]) -> list[dict[str, str]]:
 
 # LaTeX commands whose first letter is also a JSON escape (\b \f \n \r \t \u): written with one
 # backslash they would silently turn into a tab or a form feed.
-_LATEX_LIKE_ESCAPES = re.compile(
-    r"^(frac|tfrac|dfrac|forall|flat|times|text|textbf|textit|theta|tan|tanh|to|tau|top|triangle"
-    r"|beta|bar|binom|begin|big|bigg|bullet|boxed|nabla|neq|ne|nu|not|neg|notin|rho|right"
-    r"|rightarrow|rangle|rceil|rfloor|underline|underbrace|uparrow|cup)$"
+#
+# Inside $...$ every command of two or more letters is LaTeX (see repair_json_math), so this list
+# matters only for text outside math, where the model should not write LaTeX at all but does.
+_LATEX_LIKE_ESCAPES = frozenset(
+    """
+    frac tfrac dfrac forall flat fbox frown footnotesize
+    times text textbf textit textrm textsf texttt textnormal theta tan tanh to tau top triangle
+    triangleq tbinom therefore thinspace thickspace tilde tag tiny tt
+    beta bar binom begin big bigg bigl bigr biggl biggr bullet boxed bmod bot bigcup bigcap
+    bigoplus bigotimes bigvee bigwedge bigstar bigtriangleup boldsymbol bf bmatrix because
+    backslash breve bowtie
+    nabla neq ne nu not neg notin ni nexists nleq ngeq nmid nless ngtr nsim nsubseteq nsupseteq
+    nleftarrow nrightarrow nparallel nprec nsucc nolimits
+    rho right rightarrow rangle rceil rfloor rm rbrace rbrack rvert rightharpoonup rule
+    rightleftharpoons rightsquigarrow root
+    underline underbrace underset uparrow upsilon uplus upharpoonright
+    cup
+    """.split()
 )
+# A real JSON escape stays whole; a letter run after a lone backslash is a "word" to classify.
 _ESCAPES = re.compile(r'\\\\|\\"|\\/|\\u[0-9a-fA-F]{4}|\\([a-zA-Z]+)|\\')
+# Math spans in the raw reply. A span never crosses an unescaped quote, so a stray `$` ("costs
+# $5") cannot pair up with one in another JSON string.
+_RAW_MATH = re.compile(r'((?<!\\)\$\$(?:[^"\\]|\\.)*?\$\$|(?<!\\)\$(?:[^"\\]|\\.)*?\$)', re.DOTALL)
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 _PAREN_MATH = re.compile(r"\\\((.+?)\\\)", re.DOTALL)
 _BRACKET_MATH = re.compile(r"\\\[(.+?)\\\]", re.DOTALL)
@@ -278,17 +296,36 @@ _UPRIGHT = re.compile(r"\\(?:text|mathrm|operatorname)\{(sin|cos|tan|sec|csc|cot
 
 
 def repair_json_math(raw: str) -> str:
-    """Doubles the backslashes of LaTeX a model wrote with single ones, so json.loads keeps them."""
+    """Doubles the backslashes of LaTeX a model wrote with single ones, so json.loads keeps them.
 
-    def fix(m: re.Match) -> str:
-        whole, word = m.group(0), m.group(1)
-        if word is None:
-            return "\\\\" if whole == "\\" else whole  # a lone backslash, or a valid pair
-        if word[0] not in "bfnrtu":
-            return "\\" + whole  # \sin, \cos: not valid JSON at all
-        return "\\" + whole if _LATEX_LIKE_ESCAPES.match(word) else whole
+    Only \\b \\f \\n \\r \\t \\u are valid JSON escapes, so `\\root` would become a carriage
+    return plus "oot". Inside $...$ a backslash followed by two or more letters is always
+    LaTeX; a real escape there is one letter then a non-letter (`\\n` before `\\begin`).
+    Outside math a word is LaTeX when it is on the list, or when it is followed by `{`, `_` or
+    `^` (`\\rm{`, `\\bf_`)."""
 
-    return _ESCAPES.sub(fix, raw)
+    def fix(in_math: bool):
+        def fix_one(m: re.Match) -> str:
+            whole, word = m.group(0), m.group(1)
+            if word is None:
+                return "\\\\" if whole == "\\" else whole  # a lone backslash, or a valid pair
+            if word[0] not in "bfnrtu":
+                return "\\" + whole  # \sin, \cos: not valid JSON at all
+            if (
+                (in_math and len(word) > 1)
+                or word in _LATEX_LIKE_ESCAPES
+                or m.string[m.end() : m.end() + 1] in ("{", "_", "^")
+            ):
+                return "\\" + whole
+            return whole
+
+        return fix_one
+
+    # re.split with a group: the odd parts are the math spans, the even parts everything else.
+    parts = _RAW_MATH.split(raw)
+    for i, part in enumerate(parts):
+        parts[i] = _ESCAPES.sub(fix(in_math=i % 2 == 1), part)
+    return "".join(parts)
 
 
 def _loads(reply: str):
