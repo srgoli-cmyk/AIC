@@ -163,6 +163,13 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px sol
 .answer-body .katex-display { margin: 18px 0; padding: 16px; background: var(--ground); border-radius: 14px; overflow-x: auto; }
 .answer-body .katex { color: var(--ink); }
 .error { color: var(--bad); }
+.answer-body .streaming { white-space: pre-wrap; }
+.answer-body .cursor { display: inline-block; width: 0.55em; height: 1.1em; margin-left: 2px; vertical-align: -0.18em; background: currentColor; animation: blink 1s steps(1) infinite; }
+.answer-body .stopped { color: var(--muted); font-size: 15px; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .answer-body .cursor { animation: none; } }
+.stop { cursor: pointer; flex: none; align-self: center; padding: 12px 18px; border-radius: 999px; background: transparent; color: var(--ink); border: 1px solid var(--line); font: inherit; font-weight: 500; }
+.stop:hover { border-color: var(--muted); }
 .cite {
   cursor: pointer; display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 10px; border-radius: 999px;
   border: 1px solid var(--accent-line); background: var(--accent-deep); color: var(--accent); font-family: var(--mono); font-size: 13px; line-height: 1.7;
