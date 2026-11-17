@@ -31,6 +31,13 @@ def _load():
     return _model
 
 
+def warm_up() -> None:
+    """Load the model now (at startup) so the first question does not wait for it. Raises
+    ModelLoadError like any other use; the caller decides what a failure means."""
+    with _lock:
+        _load()
+
+
 def embed(texts: list[str]) -> list[list[float]]:
     """Embed a batch of texts: one normalized vector per text, in order. The model is loaded on
     first use and shared by the whole process."""

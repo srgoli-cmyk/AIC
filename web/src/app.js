@@ -2,11 +2,11 @@ import "./look.js";
 import * as api from "./api.js";
 import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, schedule, sectionsOf, termRange, topic } from "./course.js";
 import { $, el } from "./dom.js";
-import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel, sourceUrl } from "./render.js";
+import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel, sourceUrl, streamingHtml } from "./render.js";
 import { hideStudy, showStudy, STUDY } from "./study.js";
 import { hideSlidesPanel, showSlidesPanel } from "./site.js";
 
-const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask" };
+const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask", stop: null };
 
 // Links keep ?demo, ?backend and ?look so moving around never drops them.
 function href(params) {
@@ -341,18 +341,55 @@ async function submit(e) {
   $("go").disabled = true;
   $("result").hidden = false;
   $("asked").textContent = question;
-  $("answer").replaceChildren(el("div", { class: "skeleton" }, el("i"), el("i"), el("i")));
+  const skeleton = () => $("answer").replaceChildren(el("div", { class: "skeleton" }, el("i"), el("i"), el("i")));
+  skeleton();
   $("sources").replaceChildren();
   $("sources").parentElement.hidden = true;
+  const ctrl = new AbortController();
+  state.stop = ctrl;
+  $("stop").hidden = false;
+  // While it streams, the answer is plain escaped text; it's drawn at most once a frame.
+  let text = "";
+  let frame = 0;
+  const draw = () => {
+    frame = 0;
+    $("answer").innerHTML = streamingHtml(text);
+  };
+  const onDelta = (piece) => {
+    text += piece;
+    frame ||= requestAnimationFrame(draw);
+  };
+  const courseId = state.course.course_id;
+  const entryId = state.lecture?.entry_id;
   try {
-    const res = await api.ask(state.course.course_id, question, state.lecture?.entry_id);
+    let res;
+    try {
+      res = await api.askStream(courseId, question, entryId, { onDelta, signal: ctrl.signal });
+    } catch (err) {
+      if (!(err instanceof api.StreamUnavailable)) throw err;
+      if (ctrl.signal.aborted) throw new api.Stopped("stopped");
+      cancelAnimationFrame(frame);
+      text = "";
+      skeleton();
+      res = await api.ask(courseId, question, entryId, ctrl.signal);
+    }
+    cancelAnimationFrame(frame);
     $("answer").innerHTML = answerHtml(res.answer, res.sources); // fully escaped in render.js
     renderMath($("answer"));
     showSources(res.sources);
   } catch (err) {
-    $("answer").replaceChildren(el("p", { class: "error" }, err instanceof api.BackendError ? err.message : "Something went wrong."));
+    cancelAnimationFrame(frame);
+    if (err instanceof api.Stopped) {
+      // What came so far stays as plain text; it was never checked, so it gets no citations.
+      $("answer").innerHTML = text ? streamingHtml(text, { cursor: false }) : "";
+      $("answer").append(el("p", { class: "stopped" }, "Stopped."));
+    } else {
+      $("answer").replaceChildren(el("p", { class: "error" }, err instanceof api.BackendError ? err.message : "Something went wrong."));
+    }
   } finally {
     state.busy = false;
+    state.stop = null;
+    $("stop").hidden = true;
     $("go").disabled = false;
   }
 }
@@ -422,6 +459,7 @@ async function start() {
 }
 
 $("ask").addEventListener("submit", submit);
+$("stop").addEventListener("click", () => state.stop?.abort());
 $("q").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();

@@ -156,6 +156,15 @@ export function answerHtml(answer, sources) {
   });
 }
 
+/**
+ * The answer while it streams: plain text, escaped, with a cursor. Nothing in it is read as Markdown,
+ * math, a citation or HTML, because it hasn't been checked yet; the final answer replaces it.
+ */
+export function streamingHtml(text, { cursor = true } = {}) {
+  const shown = escape(String(text).replace(/\u0000/g, ""));
+  return `<p class="streaming">${shown}${cursor ? '<span class="cursor" aria-hidden="true"></span>' : ""}</p>`;
+}
+
 export function renderMath(el) {
   const katex = globalThis.window?.katex;
   if (!katex) return;

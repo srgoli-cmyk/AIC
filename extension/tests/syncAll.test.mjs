@@ -7,9 +7,9 @@ import { runAllSync } from "../src/syncAll.js";
 import { res } from "./helpers.mjs";
 
 const COURSES = [
-  { id: 78412, course_code: "MATH18_FA26_004" },
-  { id: 77867, course_code: "DSC10_FA26_002" },
-  { id: 70000, course_code: "UCSD_Integrity_Module" },
+  { id: 999901, course_code: "TEST18_FA26_004" },
+  { id: 999902, course_code: "TEST10_FA26_002" },
+  { id: 999903, course_code: "UCSD_Integrity_Module" },
 ];
 
 function world({ courses = COURSES, coursesStatus = 200, backendDown = false } = {}) {
@@ -62,42 +62,42 @@ test("every active course is synced in turn, with slides, and progress names the
       assert.equal(d.slidesOnlyOk, true);
       d.report({ stage: "captions", done: 1, total: 2 });
       const id = Number(d.tabUrl.split("/").pop());
-      if (id === 70000) throw new SyncError("NOTHING_TO_SYNC");
+      if (id === 999903) throw new SyncError("NOTHING_TO_SYNC");
       return done(id);
     }, reports),
   );
   assert.deepEqual(seen, COURSES.map((c) => `https://canvas.ucsd.edu/courses/${c.id}`));
-  assert.deepEqual(out.courses.map((c) => c.courseId), [78412, 77867]);
+  assert.deepEqual(out.courses.map((c) => c.courseId), [999901, 999902]);
   assert.equal(out.pending, 2);
   assert.deepEqual(out.skipped, { NO_CAPTIONS: 2 });
   assert.deepEqual(out.notes, ["No recordings or slides: UCSD_Integrity_Module."]);
-  assert.deepEqual(reports.find((r) => r.label === "DSC 10"), { stage: "captions", done: 1, total: 2, index: 2, count: 3, label: "DSC 10" });
+  assert.deepEqual(reports.find((r) => r.label === "TEST 10"), { stage: "captions", done: 1, total: 2, index: 2, count: 3, label: "TEST 10" });
   const text = formatLastSync(out, () => "today");
-  assert.match(text, /MATH 18: 15 lectures \(2 new\), 110 slide files/);
-  assert.match(formatState({ status: "running", stage: "captions", done: 3, total: 9, index: 2, count: 3, label: "DSC10_FA26_002" }, out), /^DSC 10 \(2 of 3\)\. Reading captions: 3 of 9/);
+  assert.match(text, /TEST 18: 15 lectures \(2 new\), 110 slide files/);
+  assert.match(formatState({ status: "running", stage: "captions", done: 3, total: 9, index: 2, count: 3, label: "TEST10_FA26_002" }, out), /^TEST 10 \(2 of 3\)\. Reading captions: 3 of 9/);
 });
 
 test("one class failing does not stop the others", async () => {
   const out = await runAllSync(
     deps(world(), async (d) => {
       const id = Number(d.tabUrl.split("/").pop());
-      if (id === 78412) throw new SyncError("NO_CAPTIONS_READ");
+      if (id === 999901) throw new SyncError("NO_CAPTIONS_READ");
       return done(id);
     }),
   );
-  assert.deepEqual(out.courses.map((c) => c.courseId), [77867, 70000]);
-  assert.match(out.notes[0], /^MATH 18 could not be synced: No captions could be read/);
+  assert.deepEqual(out.courses.map((c) => c.courseId), [999902, 999903]);
+  assert.match(out.notes[0], /^TEST 18 could not be synced: No captions could be read/);
 });
 
 test("an empty Media Gallery is listed with the courses that have nothing", async () => {
   const out = await runAllSync(
     deps(world(), async (d) => {
       const id = Number(d.tabUrl.split("/").pop());
-      if (id === 78412) throw new SyncError("NO_ENTRIES");
+      if (id === 999901) throw new SyncError("NO_ENTRIES");
       return done(id);
     }),
   );
-  assert.ok(out.notes.some((n) => /^No recordings or slides: .*MATH 18/.test(n)));
+  assert.ok(out.notes.some((n) => /^No recordings or slides: .*TEST 18/.test(n)));
   assert.ok(!out.notes.some((n) => /could not be synced/.test(n)));
 });
 

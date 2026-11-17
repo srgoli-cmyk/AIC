@@ -1,5 +1,9 @@
 // Calls to the FastAPI backend (contracts/api.md). Errors carry a message that is safe to show.
 import { DEMO_COURSES, demoAnswer, demoCourse, demoStudy } from "./demo.js";
+import { BackendError, Stopped, StreamUnavailable } from "./errors.js";
+import { streamAnswer } from "./stream.js";
+
+export { BackendError, Stopped, StreamUnavailable };
 
 const params = new URLSearchParams(location.search);
 // Served by the backend at /app/: same origin. Served on its own (`make web`): the default port.
@@ -7,7 +11,6 @@ const sameOrigin = location.pathname.startsWith("/app/");
 export const BACKEND = (params.get("backend") || (sameOrigin ? location.origin : "http://localhost:8000")).replace(/\/$/, "");
 export let demo = params.has("demo");
 
-export class BackendError extends Error {}
 
 export function useDemo() {
   demo = true;
@@ -16,15 +19,25 @@ export function useDemo() {
 async function call(path, init, timeoutMs) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // The caller's signal (the Stop button) aborts the request too.
+  const outer = init?.signal;
+  if (outer?.aborted) {
+    clearTimeout(timer);
+    throw new Stopped("stopped");
+  }
+  const onAbort = () => ctrl.abort();
+  outer?.addEventListener("abort", onAbort, { once: true });
   let res;
   try {
     res = await fetch(`${BACKEND}${path}`, { ...init, signal: ctrl.signal });
   } catch (e) {
+    if (outer?.aborted) throw new Stopped("stopped");
     throw new BackendError(
       e.name === "AbortError" ? "The backend took too long to answer." : "Could not reach the backend. Is `make start` running?"
     );
   } finally {
     clearTimeout(timer);
+    outer?.removeEventListener("abort", onAbort);
   }
   if (res.status === 204) return null;
   let body;
@@ -70,7 +83,7 @@ export async function course(courseId) {
   return c;
 }
 
-export async function ask(courseId, question, entryId) {
+export async function ask(courseId, question, entryId, signal) {
   if (demo) {
     await pause(1400);
     return demoAnswer(question, entryId);
@@ -79,11 +92,46 @@ export async function ask(courseId, question, entryId) {
   if (entryId) body.entry_id = entryId;
   const res = await call(
     "/ask",
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal },
     120000
   );
   if (typeof res?.answer !== "string" || !Array.isArray(res.sources)) {
     throw new BackendError("The backend sent an answer this page cannot read.");
+  }
+  return res;
+}
+
+/**
+ * The same question over POST /ask/stream: onDelta(text) gets each piece as it is written, and the
+ * result is the final answer, as /ask returns it. Throws StreamUnavailable when /ask should be used
+ * instead, Stopped when `signal` aborts, BackendError otherwise. Gives up after two minutes, like /ask.
+ */
+export async function askStream(courseId, question, entryId, { onDelta, signal } = {}) {
+  if (demo) return demoStream(demoAnswer(question, entryId), onDelta, signal);
+  const body = { course_id: courseId, question };
+  if (entryId) body.entry_id = entryId;
+  if (signal?.aborted) throw new Stopped("stopped");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000);
+  const onAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await streamAnswer(fetch, `${BACKEND}/ask/stream`, body, { onDelta, signal: ctrl.signal });
+  } catch (e) {
+    // Our own two-minute limit, not Stop: say so, and don't fall back for another two minutes.
+    if (e instanceof Stopped && !signal?.aborted) throw new BackendError("The backend took too long to answer.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function demoStream(res, onDelta, signal) {
+  for (const word of res.answer.match(/\S+\s*/g) || []) {
+    if (signal?.aborted) throw new Stopped("stopped");
+    await pause(25);
+    onDelta?.(word);
   }
   return res;
 }

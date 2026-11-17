@@ -285,6 +285,81 @@ def test_latex_written_with_single_backslashes_survives():
     assert study.repair_json_math(untouched) == untouched
 
 
+def _read(inner: str) -> str:
+    """The text of a JSON string written by a model, with LaTeX in it, after the repair."""
+    return json.loads(study.repair_json_math('{"v":"' + inner + '"}'))["v"]
+
+
+LATEX = [
+    r"\root{3}{x}",
+    r"\frac{1}{2}",
+    r"\theta",
+    r"\nu",
+    r"\beta",
+    r"\rho",
+    r"\nabla f",
+    r"\times",
+    r"\tau",
+    r"\binom{n}{k}",
+    r"\neq",
+    r"\left( x \right)",
+    r"\bar{x}",
+    r"\text{if}",
+    r"\boxed{4}",
+    r"\rm{d}",
+    r"\bmod 3",
+    r"\upsilon",
+    r"\tilde{x}",
+]
+
+
+@pytest.mark.parametrize("latex", LATEX)
+def test_single_backslash_latex_inside_math_is_kept(latex):
+    assert _read(f"so ${latex}$ and $${latex}$$ end") == f"so ${latex}$ and $${latex}$$ end"
+
+
+@pytest.mark.parametrize(
+    "latex", [x for x in LATEX if x.split("{")[0].split()[0][1:] in study._LATEX_LIKE_ESCAPES]
+)
+def test_listed_latex_outside_math_is_kept(latex):
+    assert _read(f"see {latex} here") == f"see {latex} here"
+
+
+def test_right_paren_command_outside_math_is_kept():
+    # \right is listed, \rm and \bf are caught by the `{` that follows them
+    assert _read(r"\right) \rm{d} \bf{x} \t_1") == r"\right) \rm{d} \bf{x} \t_1"
+
+
+def test_a_json_escape_before_a_command_inside_math_stays_an_escape():
+    # "\n" then "\begin": one letter followed by a non-letter is a real newline
+    assert _read(r"$$x\n\begin{matrix}1\end{matrix}$$") == "$$x\n\\begin{matrix}1\\end{matrix}$$"
+
+
+def test_real_json_escapes_survive():
+    assert _read(r"step one.\nNext") == "step one.\nNext"
+    assert _read(r"a\tb \"q\" \\ c \/ é") == 'a\tb "q" \\ c / é'
+    assert _read(r"$x$ done.\nThen $y$") == "$x$ done.\nThen $y$"
+
+
+def test_a_stray_dollar_does_not_pair_with_one_in_another_string():
+    raw = r'{"a":"costs $5","b":"\root{3}{x}"}'
+    # The second string is outside math, and \root is on the list.
+    assert json.loads(study.repair_json_math(raw)) == {"a": "costs $5", "b": r"\root{3}{x}"}
+
+
+def test_a_lesson_keeps_single_backslash_latex_in_steps():
+    raw = (
+        '{"sections":[{"title":"Roots","body":"Cube roots.","citation":"x","problems":['
+        r'{"question":"Simplify $\root{3}{8}$.",'
+        r'"steps":["Rewrite as $\frac{1}{\sqrt{3}}$.","Then $\root{3}{x}$."],'
+        r'"answer":"$2$","citation":"x","from_lecture":false}]}],"check":[]}'
+    )
+    lesson = study.parse_lesson(raw, HITS)
+    problem = lesson.sections[0].problems[0]
+    assert problem.question == r"Simplify $\root{3}{8}$."
+    assert problem.steps == [r"Rewrite as $\frac{1}{\sqrt{3}}$.", r"Then $\root{3}{x}$."]
+
+
 def test_upright_function_names_become_the_real_commands():
     reply = json.dumps({"cards": [{"front": "$\\text{sin} x$", "back": "$\\mathrm{cos} x$"}]})
     card = study.parse_cards(reply, HITS).cards[0]
@@ -484,6 +559,41 @@ def test_an_unreadable_check_keeps_the_lesson_as_written(lecture):
 )
 def test_math_without_dollars_is_marked_so_the_page_draws_it(raw, shown):
     assert study._rich(raw, 500) == shown
+
+
+def test_study_writer_and_check_use_their_own_reasoning_settings(lecture, monkeypatch):
+    monkeypatch.setattr(
+        study,
+        "settings",
+        replace(
+            study.settings,
+            openrouter_study_model="x/y",
+            openrouter_reasoning="high",
+            openrouter_study_reasoning="off",
+            openrouter_check_reasoning="low",
+        ),
+    )
+    llm = lecture(_lesson_with(("Solve $x = 1$.", "$1$")), {"problems": []})
+    _study("teach")
+    assert [c[1]["reasoning"] for c in llm.calls] == ["off", "low"]
+
+
+def test_the_writer_follows_the_answer_setting_when_there_is_no_study_model(lecture, monkeypatch):
+    monkeypatch.setattr(
+        study,
+        "settings",
+        replace(
+            study.settings,
+            openrouter_study_model="",
+            openrouter_reasoning="off",
+            openrouter_study_reasoning="high",  # ignored: the writer is OPENROUTER_MODEL
+            openrouter_check_reasoning="",
+        ),
+    )
+    llm = lecture(_lesson_with(("Solve $x = 1$.", "$1$")), {"problems": []})
+    _study("teach")
+    # The check's own empty setting stays the default; it does not fall back to anything.
+    assert [c[1]["reasoning"] for c in llm.calls] == ["off", ""]
 
 
 def test_the_checks_use_the_check_model(lecture, monkeypatch):
