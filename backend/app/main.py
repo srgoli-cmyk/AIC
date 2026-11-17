@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, coursesite, db, ingest, slides, study
+from . import answer, coursesite, db, embeddings, ingest, slides, study
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -66,6 +66,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         db.rename_documents(slides.display_name)
     except DB_DOWN:
         log.warning("database unavailable at startup; schema will be applied on first use")
+    # Load the embedding model now, off the event loop, so the first question is not slow. A
+    # failure must not stop the app: a request that needs the model tries to load it again and
+    # answers 503 if that fails too. Only the error type is logged, never its message.
+    try:
+        await run_in_threadpool(embeddings.warm_up)
+    except Exception as exc:
+        log.error("embedding model warm-up failed: %s", type(exc).__name__)
     yield
 
 
