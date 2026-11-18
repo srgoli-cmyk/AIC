@@ -43,6 +43,17 @@ class Settings:
         "CORS_ORIGIN_REGEX",
         r"^(chrome-extension://[a-p]{32}|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?)$",
     )
+    # Google OAuth 2.0 (Sign in with UCSD Google). Both id and secret must be set for auth login.
+    # Just getting everything from env file
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = field(default=os.getenv("GOOGLE_CLIENT_SECRET", ""), repr=False)
+    auth_redirect_uri: str = os.getenv(
+        "AUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback"
+    )
+    allowed_email_domain: str = os.getenv("ALLOWED_EMAIL_DOMAIN", "ucsd.edu").strip().lower()
+    session_ttl_days: int = int(os.getenv("SESSION_TTL_DAYS", "30"))
+    extension_token_ttl_days: int = int(os.getenv("EXTENSION_TOKEN_TTL_DAYS", "90"))
+    cookie_secure: bool = os.getenv("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
 
 
 settings = Settings()

@@ -12,6 +12,53 @@ FastAPI's schema. `info.title` is `AI Lecture Search`; the extension checks this
 ## GET /health
 Response `200`: `{"status": "ok"}`
 
+## Auth
+All endpoints except `/health`, `/openapi.json`, and `/auth/*` require a verified `@ucsd.edu` student.
+Clients authenticate in one of two ways:
+- **Web app**: `HttpOnly` session cookie `aic_session` (`SameSite=Lax`; `Secure` in HTTPS deployments).
+- **Chrome extension**: `Authorization: Bearer <token>` header.
+
+Student data (courses, lectures, documents, chunks) is private per student.
+
+### GET /auth/google/login
+Query parameter: `client` is `"web"` (default) or `"extension"`.
+Redirects (`302`) to Google's OAuth 2.0 authorization URL using PKCE, an anti-CSRF `state` cookie/record, and `hd=ucsd.edu`.
+`503 {"detail": "auth service not configured"}` when `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` is unset.
+
+### GET /auth/google/callback
+Handles Google's OAuth redirect (`code`, `state`). Exchanges `code` with Google and verifies the ID token's signature, audience, `email_verified == true`, `hd == "ucsd.edu"`, and `@ucsd.edu` email suffix on the server.
+- On invalid `state` or Google error: redirects `302` to `/app/?auth_error=login_failed` (or `/auth/extension/done?error=login_failed` for `client=extension`).
+- On non-`@ucsd.edu` or unverified account: redirects `302` to `/app/?auth_error=ucsd_only` (or `/auth/extension/done?error=ucsd_only` for `client=extension`).
+- On success (`client=web`): upserts the student, creates a web session, sets `aic_session`, and redirects `302` to `/app/`.
+- On success (`client=extension`): upserts the student, creates a single-use exchange code (valid for 60 seconds), and redirects `302` to `/auth/extension/done?code=<one-time-code>`.
+
+### GET /auth/extension/done
+Minimal landing page for the extension login tab (`?code=...` or `?error=...`). The Chrome extension watches this URL via `chrome.tabs.onUpdated`, exchanges `code` via `POST /auth/extension/exchange`, and closes the tab.
+
+### POST /auth/extension/exchange
+Body:
+```json
+{"code": "<one-time-code>"}
+```
+Unknown fields are rejected with `422`. Consumes the single-use code immediately and mints a revocable extension bearer token.
+Response `200`:
+```json
+{"token": "<bearer-token>", "user": {"id": "usr_...", "email": "student@ucsd.edu", "name": "Ada Lovelace"}}
+```
+`401 {"detail": "invalid or expired code"}` when the code is unknown, already used, or expired.
+
+### GET /auth/me
+Requires a valid `aic_session` cookie or `Authorization: Bearer <token>`.
+Response `200`:
+```json
+{"id": "usr_...", "email": "student@ucsd.edu", "name": "Ada Lovelace"}
+```
+`401 {"detail": "not authenticated"}` when missing, invalid, or expired.
+
+### POST /auth/logout
+Revokes the current session (from `aic_session` cookie or `Authorization: Bearer <token>`) and clears the `aic_session` cookie.
+Response `204`.
+
 ## POST /sync
 Body: `SyncPayload`, see `sync_payload.schema.json`. Example: `fixtures/sync_sample.json`.
 
@@ -182,6 +229,9 @@ A reply from the model that cannot be read is asked for once more before the req
 
 ## Errors
 All errors use FastAPI's default shape: `{"detail": ...}`.
+- `401 {"detail": "not authenticated"}`: missing, invalid, or expired session cookie or bearer token.
+- `403 {"detail": "ucsd.edu account required"}`: Google account is not a verified `@ucsd.edu` Google Workspace account.
+- `503 {"detail": "auth service not configured"}`: `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` is not set.
 - `503 {"detail": "database unavailable"}`: the database cannot be reached.
 - `503 {"detail": "answer service not configured"}`: no API key is set for `/ask`.
 - `503 {"detail": "search service unavailable"}`: the embedding model could not be loaded for `/ask`.
