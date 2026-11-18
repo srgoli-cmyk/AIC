@@ -9,6 +9,7 @@ pythonpath = ["."]
 markers = [
     "integration: needs a running Postgres (make db)",
     "slow: loads the real embedding model (downloads it on first use)",
+    "no_auth_override: skips automatic test student auth override",
 ]
 
 [tool.ruff]

@@ -6,12 +6,15 @@ import os
 import dbtools
 import netguard
 import pytest
+from sqlalchemy import text as sa_text
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 MAIN_URL, TEST_URL = dbtools.resolve_urls()
 os.environ["DATABASE_URL"] = TEST_URL  # must happen before any `import app...`
 # An existing variable (even an empty one) wins over .env, so no real key is ever loaded in tests.
 os.environ["OPENROUTER_API_KEY"] = ""
+# Cap libpq connection timeout in tests so unreachable mock hosts (127.0.0.1:1) fail fast on Windows
+os.environ.setdefault("PGCONNECT_TIMEOUT", "2")
 
 from app import db  # noqa: E402
 from app.config import settings  # noqa: E402
@@ -43,6 +46,15 @@ def _clean_database(request):
         request.getfixturevalue("_test_database")
         with db.engine.begin() as conn:
             dbtools.truncate_all(conn)
+            # Re-seed default test student to satisfy foreign keys and backwards-compatible tests
+            conn.execute(
+                sa_text(
+                    "INSERT INTO users (id, google_sub, email, name, created_at, last_login_at) "
+                    "VALUES ('usr_local', 'sub_local', 'local@ucsd.edu', "
+                    "'Local Student', now(), now()) "
+                    "ON CONFLICT (id) DO NOTHING"
+                )
+            )
     yield
 
 
@@ -94,3 +106,31 @@ def _no_real_http(request, monkeypatch):
     non-local address. Tests marked `slow` load the real model, which downloads it."""
     if request.node.get_closest_marker("slow") is None:
         netguard.block_network(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _default_auth_user(request):
+    """Authenticate requests automatically in tests as LOCAL_USER_ID.
+
+    Existing test suites assume an active user context; this fixture supplies a mock
+    UserRecord for `auth.require_user`. Tests testing raw unauthenticated status or multi-user
+    isolation can mark themselves with `@pytest.mark.no_auth_override` or override
+    `app.dependency_overrides[auth.require_user]` directly.
+    """
+    if request.node.get_closest_marker("no_auth_override") is not None:
+        yield None
+        return
+
+    from app import auth, auth_db
+    from app.main import app
+
+    default_user = auth_db.UserRecord(
+        id=db.LOCAL_USER_ID,
+        email="student@ucsd.edu",
+        name="Test Student",
+    )
+    app.dependency_overrides[auth.require_user] = lambda: default_user
+    try:
+        yield default_user
+    finally:
+        app.dependency_overrides.pop(auth.require_user, None)

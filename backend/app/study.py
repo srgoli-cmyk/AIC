@@ -5,6 +5,7 @@ there is no search: the whole lecture (an even sample of a very long one) is the
 Like answer.py, nothing here logs a passage, a prompt or a reply.
 """
 
+import inspect
 import json
 import logging
 import random
@@ -598,18 +599,33 @@ def _check_quiz(questions: list[PracticeQuestion]) -> list[PracticeQuestion]:
     return kept if kept is not None and len(kept) >= QUIZ_MIN_CHECKED else questions
 
 
+def _call_fn(fn, *args, **kwargs):
+    """Call fn passing kwargs only if accepted (supports test mocks with legacy signatures)."""
+    try:
+        sig = inspect.signature(fn)
+        if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    except (ValueError, TypeError):
+        pass
+    return fn(*args, **kwargs)
+
+
 def study_lecture(
-    entry_id: str, kind: str, rng: random.Random | None = None
+    entry_id: str,
+    kind: str,
+    rng: random.Random | None = None,
+    *,
+    user_id: str = db.LOCAL_USER_ID,
 ) -> LessonResponse | CardsResponse | PracticeResponse:
     """Raises AnswerNotConfigured, AnswerUnavailable or LectureNotIndexed; main maps them."""
     if not settings.openrouter_api_key:
         raise answer.AnswerNotConfigured
-    chunks = db.lecture_chunks(entry_id)
+    chunks = _call_fn(db.lecture_chunks, entry_id, user_id=user_id)
     if not chunks:
         raise LectureNotIndexed
     given = passages_for(chunks)
     # The professor's slides for this lecture carry the numbers the captions only point at.
-    given += slidematch.slide_pages_for(entry_id, chunks)
+    given += _call_fn(slidematch.slide_pages_for, entry_id, chunks, user_id=user_id)
     # Now and then a reply is not the JSON that was asked for; one more try usually is.
     for attempt in (1, 2):
         made = _make(kind, given, rng)

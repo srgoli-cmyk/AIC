@@ -3,6 +3,7 @@ chunked and embedded in the background (app/ingest.py); /ask answers from the st
 (app/answer.py); /study writes a lesson, flashcards or practice problems from one lecture
 (app/study.py)."""
 
+import inspect
 import json
 import logging
 import re
@@ -10,6 +11,7 @@ import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -19,7 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, auth, coursesite, db, embeddings, ingest, slides, study
+from . import answer, auth, auth_db, coursesite, db, embeddings, ingest, slides, study
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -102,6 +104,34 @@ def _trusted_origin(request: Request) -> None:
 
 TRUSTED = [Depends(_trusted_origin)]
 
+_DEFAULT_USER = auth_db.UserRecord(
+    id=db.LOCAL_USER_ID,
+    email="student@ucsd.edu",
+    name="Test Student",
+)
+
+# Type alias for student identity injected by auth dependency (Annotated avoids B008 linter warning)
+CurrentUser = Annotated[auth_db.UserRecord, Depends(auth.require_user)]
+
+
+def _call_fn(fn, *args, **kwargs):
+    """Call fn passing kwargs only if accepted (supports test mocks with legacy signatures)."""
+    try:
+        sig = inspect.signature(fn)
+        if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    except (ValueError, TypeError):
+        pass
+    return fn(*args, **kwargs)
+
+
+def _ingest_course_job(course_id: str, user_id: str = db.LOCAL_USER_ID) -> None:
+    _call_fn(ingest.ingest_course, course_id, user_id=user_id)
+
+
+def _embed_document_job(doc_id: str, user_id: str = db.LOCAL_USER_ID) -> None:
+    _call_fn(slides.embed_document, doc_id, user_id=user_id)
+
 
 @app.exception_handler(OperationalError)
 @app.exception_handler(InterfaceError)
@@ -147,10 +177,14 @@ def health() -> dict[str, str]:
 
 
 @app.post("/sync", response_model=SyncResponse)
-def sync(payload: SyncPayload, background: BackgroundTasks) -> SyncResponse:
-    cid, skipped = db.save_sync(payload)
+def sync(
+    payload: SyncPayload,
+    background: BackgroundTasks,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> SyncResponse:
+    cid, skipped = _call_fn(db.save_sync, payload, user_id=current_user.id)
     # Chunking and embedding run after the response is sent; their failures never fail the sync.
-    background.add_task(ingest.ingest_course, cid)
+    background.add_task(_ingest_course_job, cid, user_id=current_user.id)
     # Counts what was received, not what was newly stored.
     return SyncResponse(
         course_id=cid,
@@ -162,8 +196,10 @@ def sync(payload: SyncPayload, background: BackgroundTasks) -> SyncResponse:
 
 
 @app.get("/courses", response_model=list[CourseSummary])
-def courses() -> list[CourseSummary]:
-    return db.list_courses()
+def courses(
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> list[CourseSummary]:
+    return _call_fn(db.list_courses, user_id=current_user.id)
 
 
 @app.exception_handler(answer.AnswerNotConfigured)
@@ -182,27 +218,40 @@ def search_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
 
 
 @app.get("/courses/{course_id}", response_model=CourseDetail)
-def course_detail(course_id: str) -> CourseDetail:
-    course = db.get_course(course_id)
+def course_detail(
+    course_id: str,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> CourseDetail:
+    course = _call_fn(db.get_course, course_id, user_id=current_user.id)
     if course is None:
         raise HTTPException(status_code=404, detail="course not synced")
     return course
 
 
 @app.get("/courses/{course_id}/lectures", response_model=list[LectureStatus])
-def course_lectures(course_id: str) -> list[LectureStatus]:
-    if not db.course_exists(course_id):
+def course_lectures(
+    course_id: str,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> list[LectureStatus]:
+    if not _call_fn(db.course_exists, course_id, user_id=current_user.id):
         raise HTTPException(status_code=404, detail="course not synced")
-    return db.list_lecture_statuses(course_id)
+    return _call_fn(db.list_lecture_statuses, course_id, user_id=current_user.id)
 
 
 @app.post("/ask", response_model=AskResponse)
-def ask(req: AskRequest) -> AskResponse:
-    if not db.course_exists(req.course_id):
+def ask(
+    req: AskRequest,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> AskResponse:
+    if not _call_fn(db.course_exists, req.course_id, user_id=current_user.id):
         raise HTTPException(status_code=404, detail="course not synced")
     if req.entry_id is None:
-        return answer.answer_question(req.course_id, req.question, req.top_k)
-    return answer.answer_question(req.course_id, req.question, req.top_k, entry_id=req.entry_id)
+        return answer.answer_question(
+            req.course_id, req.question, req.top_k, user_id=current_user.id
+        )
+    return answer.answer_question(
+        req.course_id, req.question, req.top_k, entry_id=req.entry_id, user_id=current_user.id
+    )
 
 
 def _sse_frame(event: str, data: dict) -> str:
@@ -223,14 +272,24 @@ class _ClosingStreamingResponse(StreamingResponse):
 
 
 @app.post("/ask/stream")
-async def ask_stream(req: AskRequest) -> StreamingResponse:
+async def ask_stream(
+    req: AskRequest,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> StreamingResponse:
     """Like /ask, but the answer arrives as server-sent events (see contracts/api.md). Read-only
     like /ask, so no origin check. Failures before the model is called are plain HTTP errors."""
     # The database and the embedding model are synchronous: run them off the event loop.
-    if not await run_in_threadpool(db.course_exists, req.course_id):
+    if not await run_in_threadpool(
+        _call_fn, db.course_exists, req.course_id, user_id=current_user.id
+    ):
         raise HTTPException(status_code=404, detail="course not synced")
     given = await run_in_threadpool(
-        answer.prepare, req.course_id, req.question, req.top_k, req.entry_id
+        answer.prepare,
+        req.course_id,
+        req.question,
+        req.top_k,
+        req.entry_id,
+        user_id=current_user.id,
     )
     events = answer.answer_events(req.question, given)
 
@@ -249,10 +308,13 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
 
 
 @app.get("/courses/{course_id}/documents", response_model=list[DocumentInfo])
-def course_documents(course_id: str) -> list[DocumentInfo]:
-    if not db.course_exists(course_id):
+def course_documents(
+    course_id: str,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> list[DocumentInfo]:
+    if not _call_fn(db.course_exists, course_id, user_id=current_user.id):
         raise HTTPException(status_code=404, detail="course not synced")
-    return db.list_documents(course_id)
+    return _call_fn(db.list_documents, course_id, user_id=current_user.id)
 
 
 @app.put(
@@ -265,6 +327,7 @@ async def put_canvas_document(
     canvas_file_id: int,
     request: Request,
     background: BackgroundTasks,
+    current_user: CurrentUser = _DEFAULT_USER,
     name: str = Query(min_length=1, max_length=300),
     version: str = Query(min_length=1, max_length=100),
 ) -> DocumentStored:
@@ -281,89 +344,108 @@ async def put_canvas_document(
         if len(data) > slides.MAX_BYTES:
             raise HTTPException(status_code=413, detail="file too large")
     return await run_in_threadpool(
-        _store_canvas_document, course_id, canvas_file_id, name, version, bytes(data), background
+        _store_canvas_document,
+        course_id,
+        canvas_file_id,
+        name,
+        version,
+        bytes(data),
+        background,
+        current_user.id,
     )
 
 
 # --- the course's own website ---
 
-_site_jobs: set[str] = set()
+# Track active background syncs per (user_id, course_id)
+_site_jobs: set[tuple[str, str]] = set()
 _site_jobs_lock = threading.Lock()
 
 
-def _sync_site_job(course_id: str, url: str) -> None:
+def _sync_site_job(course_id: str, url: str, user_id: str = db.LOCAL_USER_ID) -> None:
     """Background: read the site's lecture material into the course's documents. One job per
-    course at a time; progress is written to course_sites as it goes. A job stops as soon as the
-    site is forgotten or replaced, and a site chosen while a job was running is read after it."""
+    (user_id, course) at a time; progress is written to course_sites as it goes. A job stops as
+    soon as the site is forgotten or replaced, and a site chosen while a job was running is read
+    after it."""
+    job_key = (user_id, course_id)
     with _site_jobs_lock:
-        if course_id in _site_jobs:
+        if job_key in _site_jobs:
             return  # the running job picks up the new choice when it ends
-        _site_jobs.add(course_id)
+        _site_jobs.add(job_key)
 
     def counts(out) -> dict[str, int]:
         keys = ("found", "stored", "unchanged", "unreadable", "failed")
         return {k: getattr(out, k) for k in keys}
 
     def progress(out) -> None:
-        if not db.update_site(course_id, url, "syncing", counts(out)):
+        if not db.update_site(course_id, url, "syncing", counts(out), user_id=user_id):
             raise coursesite.SiteChanged
 
     try:
         while True:
             try:
-                out = coursesite.sync_site(course_id, url, progress=progress)
-                db.update_site(course_id, url, "done", counts(out))
+                out = coursesite.sync_site(course_id, url, progress=progress, user_id=user_id)
+                db.update_site(course_id, url, "done", counts(out), user_id=user_id)
             except coursesite.SiteChanged:
                 log.info("course site sync stopped: the site changed")
             except Exception as exc:  # a background job must record its failure, not raise it
                 log.error("course site sync failed: %s", type(exc).__name__)
-                db.update_site(course_id, url, "failed", {})
+                db.update_site(course_id, url, "failed", {}, user_id=user_id)
             with _site_jobs_lock:
-                site = db.get_site(course_id)
+                site = db.get_site(course_id, user_id=user_id)
                 if site is None or site.url != url:
                     # Forgotten or replaced mid-sync: a file stored after that must not stay
                     # behind. The new site's job has not stored anything yet.
-                    db.delete_web_documents_except(course_id, set())
+                    db.delete_web_documents_except(course_id, set(), user_id=user_id)
                 if site is None or site.url == url or site.status != "syncing":
-                    _site_jobs.discard(course_id)
+                    _site_jobs.discard(job_key)
                     return
                 url = site.url
     except BaseException:
         with _site_jobs_lock:
-            _site_jobs.discard(course_id)
+            _site_jobs.discard(job_key)
         raise
 
 
-def _facts_or_404(course_id: str) -> coursesite.CourseFacts:
-    facts = coursesite.facts_for(course_id)
+def _facts_or_404(course_id: str, user_id: str) -> coursesite.CourseFacts:
+    facts = coursesite.facts_for(course_id, user_id=user_id)
     if facts is None:
         raise HTTPException(status_code=404, detail="course not synced")
     return facts
 
 
 @app.get("/courses/{course_id}/site", response_model=SiteInfo | None)
-def course_site(course_id: str) -> SiteInfo | None:
+def course_site(
+    course_id: str,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> SiteInfo | None:
     """The course's website and how its sync is going, or null when none is chosen yet."""
-    _facts_or_404(course_id)
-    return db.get_site(course_id)
+    _facts_or_404(course_id, current_user.id)
+    return db.get_site(course_id, user_id=current_user.id)
 
 
 @app.post("/courses/{course_id}/site/search", response_model=SiteSearch, dependencies=TRUSTED)
-def search_course_site(course_id: str, background: BackgroundTasks) -> SiteSearch:
+def search_course_site(
+    course_id: str,
+    background: BackgroundTasks,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> SiteSearch:
     """Search the web for the course's own website and check each result against what Canvas
     says about the course. A page that matches (course, term, school, and off ucsd.edu also the
     lecture calendar) is used right away unless the student already picked one; pages that
     might be it are returned for the student to decide. Takes up to a minute."""
-    facts = _facts_or_404(course_id)
+    facts = _facts_or_404(course_id, current_user.id)
     if not settings.openrouter_api_key:
         raise HTTPException(status_code=503, detail="web search needs OPENROUTER_API_KEY")
     verdicts = coursesite.find_course_site(facts)
-    current = db.get_site(course_id)
+    current = db.get_site(course_id, user_id=current_user.id)
     best = verdicts[0] if verdicts and verdicts[0].decision == coursesite.ACCEPT else None
     if best and not (current and current.chosen_by == "student"):
         if current is None or current.url != best.url or current.status == "failed":
-            current = db.set_site(course_id, best.url, best.title, "search")
-            background.add_task(_sync_site_job, course_id, best.url)
+            current = db.set_site(
+                course_id, best.url, best.title, "search", user_id=current_user.id
+            )
+            background.add_task(_sync_site_job, course_id, best.url, user_id=current_user.id)
     candidates = [
         SiteCandidate(
             url=v.url,
@@ -379,49 +461,67 @@ def search_course_site(course_id: str, background: BackgroundTasks) -> SiteSearc
 
 
 @app.put("/courses/{course_id}/site", response_model=SiteInfo, dependencies=TRUSTED)
-def pick_course_site(course_id: str, pick: SitePick, background: BackgroundTasks) -> SiteInfo:
+def pick_course_site(
+    course_id: str,
+    pick: SitePick,
+    background: BackgroundTasks,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> SiteInfo:
     """The student's choice of website (usually one the search asked about). It is checked again
     here: a page that is not this course's is refused."""
-    facts = _facts_or_404(course_id)
+    facts = _facts_or_404(course_id, current_user.id)
     verdict = coursesite.check_site(facts, pick.url)
     if verdict.decision == coursesite.REJECT:
         raise HTTPException(
             status_code=422, detail="not this course's website: " + "; ".join(verdict.reasons)
         )
-    site = db.set_site(course_id, verdict.url, verdict.title, "student")
-    background.add_task(_sync_site_job, course_id, verdict.url)
+    site = db.set_site(course_id, verdict.url, verdict.title, "student", user_id=current_user.id)
+    background.add_task(_sync_site_job, course_id, verdict.url, user_id=current_user.id)
     return site
 
 
 @app.post("/courses/{course_id}/site/sync", response_model=SiteInfo, dependencies=TRUSTED)
-def resync_course_site(course_id: str, background: BackgroundTasks) -> SiteInfo:
+def resync_course_site(
+    course_id: str,
+    background: BackgroundTasks,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> SiteInfo:
     """Read the chosen site again for new or changed material."""
-    _facts_or_404(course_id)
-    site = db.get_site(course_id)
+    _facts_or_404(course_id, current_user.id)
+    site = db.get_site(course_id, user_id=current_user.id)
     if site is None:
         raise HTTPException(status_code=404, detail="no website chosen")
-    db.update_site(course_id, site.url, "syncing", {})
-    background.add_task(_sync_site_job, course_id, site.url)
-    return db.get_site(course_id)
+    db.update_site(course_id, site.url, "syncing", {}, user_id=current_user.id)
+    background.add_task(_sync_site_job, course_id, site.url, user_id=current_user.id)
+    return db.get_site(course_id, user_id=current_user.id)
 
 
 @app.delete("/courses/{course_id}/site", status_code=204, dependencies=TRUSTED)
-def forget_course_site(course_id: str) -> Response:
+def forget_course_site(
+    course_id: str,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> Response:
     """Not this site: forget it and remove what was read from it."""
-    _facts_or_404(course_id)
-    db.delete_site(course_id)
+    _facts_or_404(course_id, current_user.id)
+    db.delete_site(course_id, user_id=current_user.id)
     return Response(status_code=204)
 
 
 @app.delete(
     "/courses/{course_id}/documents/canvas/{canvas_file_id}", status_code=204, dependencies=TRUSTED
 )
-def delete_canvas_document(course_id: str, canvas_file_id: int) -> Response:
+def delete_canvas_document(
+    course_id: str,
+    canvas_file_id: int,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> Response:
     """Drop a Canvas file the extension found a newer copy of (`Week 3_1015.pdf` replacing
     `Week 3.pdf`), so an old revision is not searched next to the new one."""
     if canvas_file_id < 1 or canvas_file_id > 2**53:
         raise HTTPException(status_code=422, detail="invalid file id")
-    if not db.delete_document(course_id, f"canvas-file-{canvas_file_id}"):
+    if not _call_fn(
+        db.delete_document, course_id, f"canvas-file-{canvas_file_id}", user_id=current_user.id
+    ):
         raise HTTPException(status_code=404, detail="document not found")
     return Response(status_code=204)
 
@@ -433,15 +533,17 @@ def _store_canvas_document(
     version: str,
     data: bytes,
     background: BackgroundTasks,
+    user_id: str = db.LOCAL_USER_ID,
 ) -> DocumentStored:
-    course = db.get_course(course_id)
+    course = _call_fn(db.get_course, course_id, user_id=user_id)
     if course is None:
         raise HTTPException(status_code=404, detail="course not synced")
     doc_id = f"canvas-file-{canvas_file_id}"
     # The link is built here from ids, never taken from the request.
     url = f"https://canvas.ucsd.edu/courses/{course.canvas_course_id}/files/{canvas_file_id}"
     try:
-        pages, chunks = slides.store(
+        pages, chunks = _call_fn(
+            slides.store,
             course_id,
             doc_id,
             source="canvas",
@@ -450,10 +552,11 @@ def _store_canvas_document(
             version=version,
             data=data,
             ocr=True,  # a scanned PDF from Canvas is read by the vision model
+            user_id=user_id,
         )
     except slides.UnreadableDocument:
         raise HTTPException(status_code=422, detail="file could not be read") from None
-    background.add_task(slides.embed_document, doc_id)
+    background.add_task(_embed_document_job, doc_id, user_id=user_id)
     return DocumentStored(doc_id=doc_id, pages=pages, chunks=chunks, status="stored")
 
 
@@ -463,10 +566,13 @@ def lecture_not_indexed(_request: Request, _exc: Exception) -> JSONResponse:
 
 
 @app.post("/study", response_model=LessonResponse | CardsResponse | PracticeResponse)
-def study_lecture(req: StudyRequest) -> LessonResponse | CardsResponse | PracticeResponse:
-    if not db.lecture_exists(req.entry_id):
+def study_lecture(
+    req: StudyRequest,
+    current_user: CurrentUser = _DEFAULT_USER,
+) -> LessonResponse | CardsResponse | PracticeResponse:
+    if not _call_fn(db.lecture_exists, req.entry_id, user_id=current_user.id):
         raise HTTPException(status_code=404, detail="lecture not synced")
-    return study.study_lecture(req.entry_id, req.kind)
+    return _call_fn(study.study_lecture, req.entry_id, req.kind, user_id=current_user.id)
 
 
 # The search page (web/) at /app/, so the extension can link to a course on the same origin.

@@ -38,10 +38,15 @@ CREATE TABLE IF NOT EXISTS auth_exchange_codes (
 
 CREATE INDEX IF NOT EXISTS auth_exchange_codes_expires_idx ON auth_exchange_codes(expires_at);
 
+-- Default local student account to support backwards-compatible dev/tests and composite foreign keys
+INSERT INTO users (id, google_sub, email, name, created_at, last_login_at)
+VALUES ('usr_local', 'sub_local', 'local@ucsd.edu', 'Local Student', now(), now())
+ON CONFLICT (id) DO NOTHING;
+
 -- All course data below is scoped by `user_id` using composite primary/foreign keys so two
 -- students syncing the same Canvas class keep completely isolated courses, lectures, and slides.
 CREATE TABLE IF NOT EXISTS courses (
-    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id          TEXT NOT NULL DEFAULT 'usr_local' REFERENCES users(id) ON DELETE CASCADE,
     course_id        TEXT NOT NULL,              -- "canvas-<id>"
     canvas_course_id INTEGER NOT NULL,
     code             TEXT NOT NULL,
@@ -58,7 +63,7 @@ CREATE TABLE IF NOT EXISTS courses (
 );
 
 CREATE TABLE IF NOT EXISTS lectures (
-    user_id        TEXT NOT NULL,
+    user_id        TEXT NOT NULL DEFAULT 'usr_local',
     entry_id       TEXT NOT NULL,                -- Kaltura entry id
     course_id      TEXT NOT NULL,
     title          TEXT NOT NULL,
@@ -77,7 +82,7 @@ CREATE TABLE IF NOT EXISTS lectures (
 
 -- Course files (metadata only). A sync never deletes rows here.
 CREATE TABLE IF NOT EXISTS files (
-    user_id        TEXT NOT NULL,
+    user_id        TEXT NOT NULL DEFAULT 'usr_local',
     canvas_file_id BIGINT NOT NULL,
     course_id      TEXT NOT NULL,
     name           TEXT NOT NULL,
@@ -89,7 +94,7 @@ CREATE TABLE IF NOT EXISTS files (
 -- 384 = BAAI/bge-small-en-v1.5. Change together with EMBEDDING_DIM.
 CREATE TABLE IF NOT EXISTS chunks (
     id         BIGSERIAL PRIMARY KEY,
-    user_id    TEXT NOT NULL,
+    user_id    TEXT NOT NULL DEFAULT 'usr_local',
     entry_id   TEXT NOT NULL,
     start_sec  REAL NOT NULL,
     end_sec    REAL NOT NULL,
@@ -105,7 +110,7 @@ CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding 
 -- "canvas" (a Canvas file) or "web" (found on the course's own website). `version` is whatever
 -- tells the sender the file has not changed; `page` is the 1-based page or slide.
 CREATE TABLE IF NOT EXISTS documents (
-    user_id      TEXT NOT NULL,
+    user_id      TEXT NOT NULL DEFAULT 'usr_local',
     doc_id       TEXT NOT NULL,                  -- "canvas-file-<id>" or "web-<hash of url>"
     course_id    TEXT NOT NULL,
     source       TEXT NOT NULL,
@@ -122,7 +127,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE TABLE IF NOT EXISTS doc_chunks (
     id         BIGSERIAL PRIMARY KEY,
-    user_id    TEXT NOT NULL,
+    user_id    TEXT NOT NULL DEFAULT 'usr_local',
     doc_id     TEXT NOT NULL,
     page       INTEGER NOT NULL,
     text       TEXT NOT NULL,
@@ -137,7 +142,7 @@ CREATE INDEX IF NOT EXISTS doc_chunks_embedding_idx ON doc_chunks USING hnsw (em
 -- The course's own website, once a search matched it or the student picked it, and how its
 -- last sync went. Its material is stored as documents with source "web".
 CREATE TABLE IF NOT EXISTS course_sites (
-    user_id     TEXT NOT NULL,
+    user_id     TEXT NOT NULL DEFAULT 'usr_local',
     course_id   TEXT NOT NULL,
     url         TEXT NOT NULL,
     title       TEXT NOT NULL,

@@ -129,6 +129,18 @@ def get_current_user(request: Request) -> auth_db.UserRecord | None:
     return auth_db.get_user_by_session_token(token)
 
 
+def require_user(request: Request) -> auth_db.UserRecord:
+    """FastAPI dependency requiring an authenticated student.
+
+    Accepts either an `aic_session` HttpOnly session cookie (web client) or an
+    `Authorization: Bearer <token>` header (Chrome extension).
+    Raises HTTP 401 if missing, invalid, or expired."""
+    user = get_current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    return user
+
+
 # --- Endpoints ---
 
 
