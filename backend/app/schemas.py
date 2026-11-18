@@ -248,5 +248,20 @@ class PracticeResponse(BaseModel):
     questions: list[PracticeQuestion]
 
 
+class AuthUser(BaseModel):
+    id: str
+    email: str
+    name: str
+
+
+class ExtensionExchangeRequest(_Strict):
+    code: str = Field(min_length=1, max_length=200)
+
+
+class ExtensionExchangeResponse(BaseModel):
+    token: str
+    user: AuthUser
+
+
 def course_id_for(canvas_course_id: int) -> str:
     return f"canvas-{canvas_course_id}"

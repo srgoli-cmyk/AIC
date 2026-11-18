@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, coursesite, db, embeddings, ingest, slides, study
+from . import answer, auth, coursesite, db, embeddings, ingest, slides, study
 from .config import settings
 from .schemas import (
     AskRequest,
@@ -83,9 +83,12 @@ app = FastAPI(title="AI Lecture Search", version="0.0.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=settings.cors_origin_regex,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+app.include_router(auth.router)
 
 
 def _trusted_origin(request: Request) -> None:
