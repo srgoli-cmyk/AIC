@@ -22,8 +22,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Text,
+    UniqueConstraint,
     and_,
     cast,
     create_engine,
@@ -108,10 +110,19 @@ class Base(DeclarativeBase):
     pass
 
 
+# Temporary fallback owner used by callers that have not yet been wired to require_user (Task 4).
+# Removed once every endpoint passes the authenticated student's user_id explicitly.
+LOCAL_USER_ID = "usr_local"
+
+
 class Course(Base):
     __tablename__ = "courses"
+    __table_args__ = (UniqueConstraint("user_id", "canvas_course_id"),)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     course_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    canvas_course_id: Mapped[int] = mapped_column(unique=True)  # INTEGER in init.sql
+    canvas_course_id: Mapped[int] = mapped_column()  # INTEGER in init.sql
     code: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     term: Mapped[str | None] = mapped_column(Text)
@@ -125,8 +136,16 @@ class Course(Base):
 
 class Lecture(Base):
     __tablename__ = "lectures"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "course_id"],
+            ["courses.user_id", "courses.course_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    user_id: Mapped[str] = mapped_column(Text, primary_key=True)
     entry_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id", ondelete="CASCADE"))
+    course_id: Mapped[str] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text)
     recorded_at: Mapped[date | None] = mapped_column(Date)
     recorded_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -142,16 +161,32 @@ class Lecture(Base):
 
 class CanvasFile(Base):
     __tablename__ = "files"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "course_id"],
+            ["courses.user_id", "courses.course_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    user_id: Mapped[str] = mapped_column(Text, primary_key=True)
     canvas_file_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id", ondelete="CASCADE"))
+    course_id: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     content_type: Mapped[str | None] = mapped_column(Text)
 
 
 class Chunk(Base):
     __tablename__ = "chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "entry_id"],
+            ["lectures.user_id", "lectures.entry_id"],
+            ondelete="CASCADE",
+        ),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    entry_id: Mapped[str] = mapped_column(ForeignKey("lectures.entry_id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(Text)
+    entry_id: Mapped[str] = mapped_column(Text)
     start_sec: Mapped[float] = mapped_column(Float)
     end_sec: Mapped[float] = mapped_column(Float)
     text: Mapped[str] = mapped_column(Text)
@@ -160,8 +195,16 @@ class Chunk(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "course_id"],
+            ["courses.user_id", "courses.course_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    user_id: Mapped[str] = mapped_column(Text, primary_key=True)
     doc_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id", ondelete="CASCADE"))
+    course_id: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     url: Mapped[str] = mapped_column(Text)
@@ -174,9 +217,15 @@ class Document(Base):
 
 class CourseSite(Base):
     __tablename__ = "course_sites"
-    course_id: Mapped[str] = mapped_column(
-        ForeignKey("courses.course_id", ondelete="CASCADE"), primary_key=True
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "course_id"],
+            ["courses.user_id", "courses.course_id"],
+            ondelete="CASCADE",
+        ),
     )
+    user_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    course_id: Mapped[str] = mapped_column(Text, primary_key=True)
     url: Mapped[str] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text)
     chosen_by: Mapped[str] = mapped_column(Text)
@@ -191,8 +240,16 @@ class CourseSite(Base):
 
 class DocChunk(Base):
     __tablename__ = "doc_chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "doc_id"],
+            ["documents.user_id", "documents.doc_id"],
+            ondelete="CASCADE",
+        ),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    doc_id: Mapped[str] = mapped_column(ForeignKey("documents.doc_id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(Text)
+    doc_id: Mapped[str] = mapped_column(Text)
     page: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
@@ -261,12 +318,36 @@ def _is_due():
 
 
 def _has_due_lecture():
-    return exists().where(Lecture.course_id == Course.course_id, _is_due())
+    return exists().where(
+        Lecture.user_id == Course.user_id, Lecture.course_id == Course.course_id, _is_due()
+    )
 
 
-def save_sync(payload: SyncPayload) -> tuple[str, int]:
-    """Upsert the course, its lectures and its files in ONE transaction. Returns the course_id and
-    the number of distinct lectures skipped because they belong to another course.
+def _ensure_local_user(session: Session, user_id: str) -> None:
+    """Create the placeholder `usr_local` user row when a pre-auth caller uses LOCAL_USER_ID so
+    the foreign key on `courses.user_id` is satisfied until Task 4 enforces real auth."""
+    if user_id != LOCAL_USER_ID:
+        return
+    now = datetime.now(UTC)
+    session.execute(
+        text(
+            "INSERT INTO users (id, google_sub, email, name, created_at, last_login_at) "
+            "VALUES (:id, :sub, :email, :name, :now, :now) ON CONFLICT (id) DO NOTHING"
+        ),
+        {
+            "id": LOCAL_USER_ID,
+            "sub": "local-dev-user",
+            "email": "local@ucsd.edu",
+            "name": "Local Student",
+            "now": now,
+        },
+    )
+
+
+def save_sync(payload: SyncPayload, *, user_id: str = LOCAL_USER_ID) -> tuple[str, int]:
+    """Upsert the course, its lectures and its files in ONE transaction for `user_id`. Returns
+    the course_id and the number of distinct lectures skipped because they belong to another
+    course of the same student.
 
     Nothing is ever deleted: lectures or files missing from the payload stay stored, and
     `files: []` therefore leaves stored files alone. Optional columns use COALESCE so an omitted
@@ -281,7 +362,9 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
     # session.begin() commits on success and rolls back on any exception.
     try:
         with Session(engine) as session, session.begin():
+            _ensure_local_user(session, user_id)
             course = insert(Course).values(
+                user_id=user_id,
                 course_id=cid,
                 canvas_course_id=payload.course.canvas_course_id,
                 code=payload.course.code,
@@ -295,7 +378,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
             )
             session.execute(
                 course.on_conflict_do_update(
-                    index_elements=[Course.course_id],
+                    index_elements=[Course.user_id, Course.course_id],
                     set_={
                         "code": course.excluded.code,
                         "name": course.excluded.name,
@@ -318,6 +401,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                 titles = {lec.entry_id: parse_title(lec.title) for lec in payload.lectures}
                 rows = {
                     lec.entry_id: {
+                        "user_id": user_id,
                         "entry_id": lec.entry_id,
                         "course_id": cid,
                         "title": lec.title,
@@ -334,9 +418,9 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                 lecture = insert(Lecture)
                 stored = session.execute(
                     lecture.on_conflict_do_update(
-                        index_elements=[Lecture.entry_id],
-                        # A lecture stored under another course is left completely untouched.
-                        # Such rows are not updated, so they are absent from RETURNING.
+                        index_elements=[Lecture.user_id, Lecture.entry_id],
+                        # A lecture stored under another course of this student is left completely
+                        # untouched. Such rows are not updated, so they are absent from RETURNING.
                         where=Lecture.course_id == lecture.excluded.course_id,
                         set_={
                             "title": lecture.excluded.title,
@@ -360,7 +444,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                 if skipped_ids:
                     owners = session.execute(
                         select(Lecture.entry_id, Lecture.course_id).where(
-                            Lecture.entry_id.in_(skipped_ids)
+                            Lecture.user_id == user_id, Lecture.entry_id.in_(skipped_ids)
                         )
                     ).all()
                     for entry_id, owner in owners:
@@ -376,7 +460,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
             # re-sync has nothing due, so `indexed` is left as it was.
             session.execute(
                 update(Course)
-                .where(Course.course_id == cid, _has_due_lecture())
+                .where(Course.user_id == user_id, Course.course_id == cid, _has_due_lecture())
                 .values(indexed=False)
             )
 
@@ -385,7 +469,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                 file = insert(CanvasFile)
                 session.execute(
                     file.on_conflict_do_update(
-                        index_elements=[CanvasFile.canvas_file_id],
+                        index_elements=[CanvasFile.user_id, CanvasFile.canvas_file_id],
                         set_={
                             "name": file.excluded.name,
                             "content_type": func.coalesce(
@@ -395,6 +479,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
                     ),
                     [
                         {
+                            "user_id": user_id,
                             "canvas_file_id": f.canvas_file_id,
                             "course_id": cid,
                             "name": f.name,
@@ -413,7 +498,7 @@ def save_sync(payload: SyncPayload) -> tuple[str, int]:
     return cid, skipped
 
 
-def list_courses() -> list[CourseSummary]:
+def list_courses(*, user_id: str = LOCAL_USER_ID) -> list[CourseSummary]:
     ensure_schema()
     stmt = (
         select(
@@ -423,8 +508,12 @@ def list_courses() -> list[CourseSummary]:
             func.count(Lecture.entry_id),
             Course.indexed,
         )
-        .outerjoin(Lecture, Lecture.course_id == Course.course_id)
-        .group_by(Course.course_id)
+        .outerjoin(
+            Lecture,
+            and_(Lecture.user_id == Course.user_id, Lecture.course_id == Course.course_id),
+        )
+        .where(Course.user_id == user_id)
+        .group_by(Course.user_id, Course.course_id)
         .order_by(Course.course_id)
     )
     with Session(engine) as session:
@@ -435,21 +524,21 @@ def list_courses() -> list[CourseSummary]:
     ]
 
 
-def list_lecture_statuses(course_id: str) -> list[LectureStatus]:
+def list_lecture_statuses(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[LectureStatus]:
     """Each stored lecture of the course with whether it has captions, ordered by entry_id. The
     caption text itself is never loaded: Postgres computes the flag."""
     ensure_schema()
     has_captions = (func.coalesce(func.length(Lecture.captions_srt), 0) > 0).label("has_captions")
     stmt = (
         select(Lecture.entry_id, has_captions)
-        .where(Lecture.course_id == course_id)
+        .where(Lecture.user_id == user_id, Lecture.course_id == course_id)
         .order_by(Lecture.entry_id.collate("C"))
     )
     with Session(engine) as session:
         return [LectureStatus(entry_id=r[0], has_captions=r[1]) for r in session.execute(stmt)]
 
 
-def get_course(course_id: str) -> CourseDetail | None:
+def get_course(course_id: str, *, user_id: str = LOCAL_USER_ID) -> CourseDetail | None:
     """The course with its details and every stored lecture (no captions), or None. Lectures are
     ordered by number, then recording date, then entry_id; `indexed` is per lecture: its chunks
     were built from its current captions."""
@@ -458,7 +547,7 @@ def get_course(course_id: str) -> CourseDetail | None:
     ensure_schema()
     lecture_indexed = Lecture.chunked_hash.is_not_distinct_from(_current_hash()).label("indexed")
     with Session(engine) as session:
-        course = session.get(Course, course_id)
+        course = session.get(Course, (user_id, course_id))
         if course is None:
             return None
         rows = session.execute(
@@ -473,7 +562,7 @@ def get_course(course_id: str) -> CourseDetail | None:
                 Lecture.media_url,
                 lecture_indexed,
             )
-            .where(Lecture.course_id == course_id)
+            .where(Lecture.user_id == user_id, Lecture.course_id == course_id)
             .order_by(
                 Lecture.lecture_no.asc().nulls_last(),
                 Lecture.recorded_start.asc().nulls_last(),
@@ -511,34 +600,45 @@ def get_course(course_id: str) -> CourseDetail | None:
         )
 
 
-def course_exists(course_id: str) -> bool:
+def course_exists(course_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
     if "\x00" in course_id:
         return False  # cannot exist, and the driver refuses to send it; answered as not found
     ensure_schema()
     with Session(engine) as session:
-        found = session.execute(select(Course.course_id).where(Course.course_id == course_id))
+        found = session.execute(
+            select(Course.course_id).where(Course.user_id == user_id, Course.course_id == course_id)
+        )
         return found.first() is not None
 
 
 # --- ingestion ---
 
 
-def due_lecture_ids(course_id: str) -> list[str]:
+def due_lecture_ids(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[str]:
     """Lectures of the course whose chunks are missing or were built from other captions."""
     ensure_schema()
     with Session(engine) as session:
-        stmt = select(Lecture.entry_id).where(Lecture.course_id == course_id, _is_due())
+        stmt = select(Lecture.entry_id).where(
+            Lecture.user_id == user_id, Lecture.course_id == course_id, _is_due()
+        )
         return list(session.execute(stmt.order_by(Lecture.entry_id)).scalars())
 
 
-def lecture_captions(entry_id: str) -> str | None:
+def lecture_captions(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> str | None:
     with Session(engine) as session:
-        stmt = select(Lecture.captions_srt).where(Lecture.entry_id == entry_id)
+        stmt = select(Lecture.captions_srt).where(
+            Lecture.user_id == user_id, Lecture.entry_id == entry_id
+        )
         return session.execute(stmt).scalar_one_or_none()
 
 
 def replace_chunks(
-    entry_id: str, captions_hash_: str, chunks: list[ChunkData], vectors: list[list[float]]
+    entry_id: str,
+    captions_hash_: str,
+    chunks: list[ChunkData],
+    vectors: list[list[float]],
+    *,
+    user_id: str = LOCAL_USER_ID,
 ) -> bool:
     """Replace a lecture's chunks in one transaction. Returns False (and writes nothing) if the
     chunks are already current, or if the captions changed since they were read; in the second
@@ -549,7 +649,7 @@ def replace_chunks(
     with Session(engine) as session, session.begin():
         row = session.execute(
             select(Lecture.chunked_hash, _current_hash())
-            .where(Lecture.entry_id == entry_id)
+            .where(Lecture.user_id == user_id, Lecture.entry_id == entry_id)
             .with_for_update()
         ).one_or_none()
         if row is None:
@@ -557,12 +657,13 @@ def replace_chunks(
         stored_hash, current_hash = row
         if current_hash != captions_hash_ or stored_hash == captions_hash_:
             return False
-        session.execute(delete(Chunk).where(Chunk.entry_id == entry_id))
+        session.execute(delete(Chunk).where(Chunk.user_id == user_id, Chunk.entry_id == entry_id))
         if chunks:
             session.execute(
                 insert(Chunk),
                 [
                     {
+                        "user_id": user_id,
                         "entry_id": entry_id,
                         "start_sec": c.start,
                         "end_sec": c.end,
@@ -573,24 +674,30 @@ def replace_chunks(
                 ],
             )
         session.execute(
-            update(Lecture).where(Lecture.entry_id == entry_id).values(chunked_hash=captions_hash_)
+            update(Lecture)
+            .where(Lecture.user_id == user_id, Lecture.entry_id == entry_id)
+            .values(chunked_hash=captions_hash_)
         )
     return True
 
 
-def refresh_indexed(course_id: str) -> None:
+def refresh_indexed(course_id: str, *, user_id: str = LOCAL_USER_ID) -> None:
     """indexed = the course has lectures and none of them is due."""
-    has_lectures = exists().where(Lecture.course_id == Course.course_id)
+    has_lectures = exists().where(
+        Lecture.user_id == Course.user_id, Lecture.course_id == Course.course_id
+    )
     with Session(engine) as session, session.begin():
         # Wait for a sync that is still writing this course, THEN look at the lectures. A single
         # UPDATE that blocks on the row would resume with its old view of the lectures and could
         # mark the course indexed while a newly synced lecture is due.
         session.execute(
-            select(Course.course_id).where(Course.course_id == course_id).with_for_update()
+            select(Course.course_id)
+            .where(Course.user_id == user_id, Course.course_id == course_id)
+            .with_for_update()
         ).first()
         session.execute(
             update(Course)
-            .where(Course.course_id == course_id)
+            .where(Course.user_id == user_id, Course.course_id == course_id)
             .values(indexed=and_(has_lectures, ~_has_due_lecture()))
         )
 
@@ -628,9 +735,10 @@ def save_document(
     pages: int,
     chunks: list[tuple[int, str]],
     lecture_no: int | None = None,
+    user_id: str = LOCAL_USER_ID,
 ) -> None:
     """Store a document and replace its chunks (without embeddings) in one transaction. A
-    doc_id that belongs to another course is refused with ValueRejected."""
+    doc_id that belongs to another course of the same student is refused with ValueRejected."""
     ensure_schema()
     values = {
         "course_id": course_id,
@@ -646,45 +754,64 @@ def save_document(
     try:
         with Session(engine) as session, session.begin():
             owner = session.execute(
-                select(Document.course_id).where(Document.doc_id == doc_id).with_for_update()
+                select(Document.course_id)
+                .where(Document.user_id == user_id, Document.doc_id == doc_id)
+                .with_for_update()
             ).scalar_one_or_none()
             if owner is not None and owner != course_id:
                 raise ValueRejected
-            stmt = insert(Document).values(doc_id=doc_id, **values)
-            session.execute(stmt.on_conflict_do_update(index_elements=["doc_id"], set_=values))
-            session.execute(delete(DocChunk).where(DocChunk.doc_id == doc_id))
+            stmt = insert(Document).values(user_id=user_id, doc_id=doc_id, **values)
+            session.execute(
+                stmt.on_conflict_do_update(index_elements=["user_id", "doc_id"], set_=values)
+            )
+            session.execute(
+                delete(DocChunk).where(DocChunk.user_id == user_id, DocChunk.doc_id == doc_id)
+            )
             if chunks:
                 session.execute(
                     insert(DocChunk),
-                    [{"doc_id": doc_id, "page": page, "text": text_} for page, text_ in chunks],
+                    [
+                        {"user_id": user_id, "doc_id": doc_id, "page": page, "text": text_}
+                        for page, text_ in chunks
+                    ],
                 )
     except DataError:
         raise ValueRejected from None
 
 
-def delete_document(course_id: str, doc_id: str) -> bool:
+def delete_document(course_id: str, doc_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
     """Remove one of the course's documents and its chunks. False if the course has no such
     document (another course's document is never touched)."""
     ensure_schema()
     with Session(engine) as session, session.begin():
         gone = session.execute(
-            delete(Document).where(Document.doc_id == doc_id, Document.course_id == course_id)
+            delete(Document).where(
+                Document.user_id == user_id,
+                Document.doc_id == doc_id,
+                Document.course_id == course_id,
+            )
         ).rowcount
     return bool(gone)
 
 
-def course_facts(course_id: str) -> tuple[str, str, str | None, list[str], list[date]] | None:
+def course_facts(
+    course_id: str, *, user_id: str = LOCAL_USER_ID
+) -> tuple[str, str, str | None, list[str], list[date]] | None:
     """(code, name, term, instructors, lecture dates) of a synced course, or None."""
     if "\x00" in course_id:
         return None
     ensure_schema()
     with Session(engine) as session:
-        course = session.get(Course, course_id)
+        course = session.get(Course, (user_id, course_id))
         if course is None:
             return None
         dates = session.execute(
             select(Lecture.recorded_at)
-            .where(Lecture.course_id == course_id, Lecture.recorded_at.is_not(None))
+            .where(
+                Lecture.user_id == user_id,
+                Lecture.course_id == course_id,
+                Lecture.recorded_at.is_not(None),
+            )
             .distinct()
         ).scalars()
         return course.code, course.name, course.term, list(course.instructors or []), list(dates)
@@ -704,25 +831,31 @@ def _site_info(site: CourseSite) -> SiteInfo:
     )
 
 
-def get_site(course_id: str) -> SiteInfo | None:
+def get_site(course_id: str, *, user_id: str = LOCAL_USER_ID) -> SiteInfo | None:
     ensure_schema()
     with Session(engine) as session:
-        site = session.get(CourseSite, course_id)
+        site = session.get(CourseSite, (user_id, course_id))
         return _site_info(site) if site else None
 
 
-def set_site(course_id: str, url: str, title: str, chosen_by: str) -> SiteInfo:
+def set_site(
+    course_id: str, url: str, title: str, chosen_by: str, *, user_id: str = LOCAL_USER_ID
+) -> SiteInfo:
     """Record the course's website (status "syncing", counts reset). Choosing another site
     removes the documents that came from the old one."""
     ensure_schema()
     with Session(engine) as session, session.begin():
-        site = session.get(CourseSite, course_id, with_for_update=True)
+        site = session.get(CourseSite, (user_id, course_id), with_for_update=True)
         if site is not None and site.url != url:
             session.execute(
-                delete(Document).where(Document.course_id == course_id, Document.source == "web")
+                delete(Document).where(
+                    Document.user_id == user_id,
+                    Document.course_id == course_id,
+                    Document.source == "web",
+                )
             )
         if site is None:
-            site = CourseSite(course_id=course_id)
+            site = CourseSite(user_id=user_id, course_id=course_id)
             session.add(site)
         site.url, site.title, site.chosen_by, site.status = url, title[:200], chosen_by, "syncing"
         site.found = site.stored = site.unchanged = site.unreadable = site.failed = 0
@@ -731,7 +864,14 @@ def set_site(course_id: str, url: str, title: str, chosen_by: str) -> SiteInfo:
         return _site_info(site)
 
 
-def update_site(course_id: str, url: str, status: str, counts: dict[str, int]) -> bool:
+def update_site(
+    course_id: str,
+    url: str,
+    status: str,
+    counts: dict[str, int],
+    *,
+    user_id: str = LOCAL_USER_ID,
+) -> bool:
     """Progress of a site sync. Ignored, and False, if the course has since moved to another
     site or forgotten this one."""
     ensure_schema()
@@ -739,30 +879,45 @@ def update_site(course_id: str, url: str, status: str, counts: dict[str, int]) -
         return bool(
             session.execute(
                 update(CourseSite)
-                .where(CourseSite.course_id == course_id, CourseSite.url == url)
+                .where(
+                    CourseSite.user_id == user_id,
+                    CourseSite.course_id == course_id,
+                    CourseSite.url == url,
+                )
                 .values(status=status, updated_at=datetime.now(UTC), **counts)
             ).rowcount
         )
 
 
-def delete_site(course_id: str) -> bool:
+def delete_site(course_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
     """Forget the course's website and the documents that came from it."""
     ensure_schema()
     with Session(engine) as session, session.begin():
         session.execute(
-            delete(Document).where(Document.course_id == course_id, Document.source == "web")
+            delete(Document).where(
+                Document.user_id == user_id,
+                Document.course_id == course_id,
+                Document.source == "web",
+            )
         )
         return bool(
-            session.execute(delete(CourseSite).where(CourseSite.course_id == course_id)).rowcount
+            session.execute(
+                delete(CourseSite).where(
+                    CourseSite.user_id == user_id, CourseSite.course_id == course_id
+                )
+            ).rowcount
         )
 
 
-def delete_web_documents_except(course_id: str, keep: set[str]) -> int:
+def delete_web_documents_except(
+    course_id: str, keep: set[str], *, user_id: str = LOCAL_USER_ID
+) -> int:
     """Remove web documents of the course that the site no longer posts."""
     ensure_schema()
     with Session(engine) as session, session.begin():
         return session.execute(
             delete(Document).where(
+                Document.user_id == user_id,
                 Document.course_id == course_id,
                 Document.source == "web",
                 Document.doc_id.not_in(keep or {""}),
@@ -776,22 +931,31 @@ def rename_documents(tidy: Callable[[str], str]) -> int:
     ensure_schema()
     with Session(engine) as session, session.begin():
         changed = 0
-        for doc_id, name in session.execute(select(Document.doc_id, Document.name)).all():
+        rows = session.execute(select(Document.user_id, Document.doc_id, Document.name)).all()
+        for uid, doc_id, name in rows:
             if (new := tidy(name)) != name:
-                session.execute(update(Document).where(Document.doc_id == doc_id).values(name=new))
+                session.execute(
+                    update(Document)
+                    .where(Document.user_id == uid, Document.doc_id == doc_id)
+                    .values(name=new)
+                )
                 changed += 1
         return changed
 
 
-def list_documents(course_id: str) -> list[DocumentInfo]:
+def list_documents(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[DocumentInfo]:
     """The course's documents, by name. `indexed` is true when every chunk has its embedding."""
     ensure_schema()
     pending = (
-        exists().where(DocChunk.doc_id == Document.doc_id, DocChunk.embedding.is_(None))
+        exists().where(
+            DocChunk.user_id == Document.user_id,
+            DocChunk.doc_id == Document.doc_id,
+            DocChunk.embedding.is_(None),
+        )
     ).label("pending")
     stmt = (
         select(Document, pending)
-        .where(Document.course_id == course_id)
+        .where(Document.user_id == user_id, Document.course_id == course_id)
         .order_by(Document.name, Document.doc_id)
     )
     with Session(engine) as session:
@@ -810,10 +974,16 @@ def list_documents(course_id: str) -> list[DocumentInfo]:
         ]
 
 
-def doc_chunks_without_embedding(doc_id: str, limit: int) -> list[tuple[int, str]]:
+def doc_chunks_without_embedding(
+    doc_id: str, limit: int, *, user_id: str = LOCAL_USER_ID
+) -> list[tuple[int, str]]:
     stmt = (
         select(DocChunk.id, DocChunk.text)
-        .where(DocChunk.doc_id == doc_id, DocChunk.embedding.is_(None))
+        .where(
+            DocChunk.user_id == user_id,
+            DocChunk.doc_id == doc_id,
+            DocChunk.embedding.is_(None),
+        )
         .order_by(DocChunk.id)
         .limit(limit)
     )
@@ -829,7 +999,9 @@ def set_doc_embeddings(rows: list[tuple[int, list[float]]]) -> None:
             )
 
 
-def search_doc_chunks(course_id: str, query_vector: list[float], limit: int) -> list[ChunkHit]:
+def search_doc_chunks(
+    course_id: str, query_vector: list[float], limit: int, *, user_id: str = LOCAL_USER_ID
+) -> list[ChunkHit]:
     """The `limit` document chunks of one course closest to the vector, closest first. An exact
     scan: a course has a few thousand slide chunks at most, far fewer than caption chunks."""
     ensure_schema()
@@ -843,8 +1015,15 @@ def search_doc_chunks(course_id: str, query_vector: list[float], limit: int) -> 
             DocChunk.text,
             distance,
         )
-        .join(Document, Document.doc_id == DocChunk.doc_id)
-        .where(Document.course_id == course_id, DocChunk.embedding.is_not(None))
+        .join(
+            Document,
+            and_(Document.user_id == DocChunk.user_id, Document.doc_id == DocChunk.doc_id),
+        )
+        .where(
+            Document.user_id == user_id,
+            Document.course_id == course_id,
+            DocChunk.embedding.is_not(None),
+        )
         .order_by(distance)
         .limit(limit)
     )
@@ -857,7 +1036,7 @@ def search_doc_chunks(course_id: str, query_vector: list[float], limit: int) -> 
     ]
 
 
-def lecture_chunks(entry_id: str) -> list[ChunkHit]:
+def lecture_chunks(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> list[ChunkHit]:
     """Every chunk of one lecture, in the order it was said. For the study tools, which read a
     whole lecture instead of searching it; `distance` is 0 because nothing was searched."""
     ensure_schema()
@@ -871,28 +1050,33 @@ def lecture_chunks(entry_id: str) -> list[ChunkHit]:
             Chunk.end_sec,
             Chunk.text,
         )
-        .join(Lecture, Lecture.entry_id == Chunk.entry_id)
-        .where(Chunk.entry_id == entry_id)
+        .join(Lecture, and_(Lecture.user_id == Chunk.user_id, Lecture.entry_id == Chunk.entry_id))
+        .where(Chunk.user_id == user_id, Chunk.entry_id == entry_id)
         .order_by(Chunk.start_sec)
     )
     with Session(engine) as session:
         return [ChunkHit(*row, 0.0) for row in session.execute(stmt).all()]
 
 
-def lecture_course(entry_id: str) -> str | None:
+def lecture_course(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> str | None:
     ensure_schema()
     with Session(engine) as session:
-        lecture = session.get(Lecture, entry_id)
+        lecture = session.get(Lecture, (user_id, entry_id))
         return lecture.course_id if lecture else None
 
 
-def course_pages(course_id: str, limit: int = 6_001) -> list[tuple[str, str, str, int, str]]:
+def course_pages(
+    course_id: str, limit: int = 6_001, *, user_id: str = LOCAL_USER_ID
+) -> list[tuple[str, str, str, int, str]]:
     """Every document chunk of a course as (doc_id, name, url, page, text), page by page."""
     ensure_schema()
     stmt = (
         select(Document.doc_id, Document.name, Document.url, DocChunk.page, DocChunk.text)
-        .join(Document, Document.doc_id == DocChunk.doc_id)
-        .where(Document.course_id == course_id)
+        .join(
+            Document,
+            and_(Document.user_id == DocChunk.user_id, Document.doc_id == DocChunk.doc_id),
+        )
+        .where(Document.user_id == user_id, Document.course_id == course_id)
         .order_by(Document.doc_id, DocChunk.page, DocChunk.id)
         .limit(limit)
     )
@@ -900,10 +1084,10 @@ def course_pages(course_id: str, limit: int = 6_001) -> list[tuple[str, str, str
         return [tuple(row) for row in session.execute(stmt).all()]
 
 
-def lecture_exists(entry_id: str) -> bool:
+def lecture_exists(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
     ensure_schema()
     with Session(engine) as session:
-        return session.get(Lecture, entry_id) is not None
+        return session.get(Lecture, (user_id, entry_id)) is not None
 
 
 def _version_at_least(version: str, major: int, minor: int) -> bool:
@@ -918,7 +1102,12 @@ _warned_old_pgvector = False
 
 
 def _search_statement(
-    course_id: str, query_vector: list[float], limit: int, entry_id: str | None = None
+    course_id: str,
+    query_vector: list[float],
+    limit: int,
+    entry_id: str | None = None,
+    *,
+    user_id: str = LOCAL_USER_ID,
 ):
     distance = Chunk.embedding.cosine_distance(query_vector).label("distance")
     return (
@@ -932,8 +1121,9 @@ def _search_statement(
             Chunk.text,
             distance,
         )
-        .join(Lecture, Lecture.entry_id == Chunk.entry_id)
+        .join(Lecture, and_(Lecture.user_id == Chunk.user_id, Lecture.entry_id == Chunk.entry_id))
         .where(
+            Lecture.user_id == user_id,
             Lecture.course_id == course_id,
             Chunk.embedding.is_not(None),
             *([Chunk.entry_id == entry_id] if entry_id else []),
@@ -949,13 +1139,18 @@ def _to_hits(rows) -> list[ChunkHit]:
 
 
 def search_chunks(
-    course_id: str, query_vector: list[float], limit: int, entry_id: str | None = None
+    course_id: str,
+    query_vector: list[float],
+    limit: int,
+    entry_id: str | None = None,
+    *,
+    user_id: str = LOCAL_USER_ID,
 ) -> list[ChunkHit]:
     """The `limit` chunks of one course closest to the vector (cosine), closest first. With
     `entry_id`, only that lecture's chunks."""
     global _warned_old_pgvector
     ensure_schema()
-    stmt = _search_statement(course_id, query_vector, limit, entry_id)
+    stmt = _search_statement(course_id, query_vector, limit, entry_id, user_id=user_id)
     with Session(engine) as session, session.begin():
         # Settings last for this transaction only. The index scan reads ef_search candidates and
         # the course filter is applied afterwards, so a small ef_search under-returns.
