@@ -76,6 +76,8 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
     };
     try {
       await save(state);
+      // Read current extension auth token if available
+      const { authToken } = await chrome.storage.local.get("authToken");
       const sync = all ? runAllSync : runSync;
       const summary = await sync({
         tabUrl,
@@ -83,6 +85,7 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         tabs: chrome.tabs,
         scripting: chrome.scripting,
         backendUrl,
+        token: authToken || null,
         now,
         sleep,
         report: (patch) => void report(patch),
@@ -106,6 +109,9 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         await updateAuto(courseId, (prev) => afterSuccess(prev, summary, now()));
       }
     } catch (e) {
+      if (e instanceof SyncError && e.code === "AUTH_EXPIRED") {
+        await chrome.storage.local.remove(["authToken", "authUser"]).catch(() => {});
+      }
       await save({ status: "error", courseId, message: messageFor(e), ...(auto ? { mode: "auto" } : {}), ...(all ? { scope: "all" } : {}) });
       try {
         const code = e instanceof SyncError ? e.code : "UNKNOWN";

@@ -153,7 +153,7 @@ export function courseError(e) {
  * deps.tabOpened(id) / deps.tabClosed() let the caller remember the background tab.
  */
 export async function runSync(deps) {
-  const { fetch: fetchFn, tabs, backendUrl, report, now } = deps;
+  const { fetch: fetchFn, tabs, backendUrl, report, now, token = null } = deps;
   const courseId = parseCourseId(deps.tabUrl);
   if (!courseId) throw new SyncError("NOT_COURSE_PAGE");
   const notes = [];
@@ -237,7 +237,7 @@ export async function runSync(deps) {
       categoryId = CATEGORY_ID.test(String(frame.categoryId)) ? String(frame.categoryId) : undefined;
       if (gallery.partial) notes.push(`The gallery list may be incomplete (${gallery.partial}).`);
 
-      storedBefore = new Map((await getLectures(fetchFn, backendUrl, courseId)).map((l) => [l.entry_id, l.has_captions]));
+      storedBefore = new Map((await getLectures(fetchFn, backendUrl, courseId, token)).map((l) => [l.entry_id, l.has_captions]));
       const wanted = gallery.entryIds.filter((id) => storedBefore.get(id) !== true);
       todoCount = wanted.length;
       // Only what fits in one sync is read, so nothing is downloaded and then dropped.
@@ -311,18 +311,18 @@ export async function runSync(deps) {
 
   report({ stage: "sending", done: 0, total: 0 });
   const payload = buildSyncPayload({ course, entries, files, categoryId, now: new Date(now()) });
-  const reply = await postSync(fetchFn, backendUrl, payload);
+  const reply = await postSync(fetchFn, backendUrl, payload, token);
   if (reply.skippedOtherCourse) {
     notes.push(`${reply.skippedOtherCourse} lectures already belong to another course and were left unchanged.`);
   }
 
   // The course now exists in the backend, so its slide files can be stored with it.
-  const slideNote = slidesNote(await syncSlides({ fetchFn, backendUrl, courseId, files, report }));
+  const slideNote = slidesNote(await syncSlides({ fetchFn, backendUrl, courseId, files, token, report }));
   if (slideNote) notes.push(slideNote);
 
   let storedCount;
   try {
-    storedCount = (await getLectures(fetchFn, backendUrl, courseId)).length;
+    storedCount = (await getLectures(fetchFn, backendUrl, courseId, token)).length;
   } catch {
     // The sync itself succeeded; estimate from what was known.
     storedCount = new Set([...storedBefore.keys(), ...entries.map((e) => e.id)]).size;

@@ -1,4 +1,5 @@
 // Service worker: thin wiring between the popup, the daily auto-sync and the sync controller.
+import { handleAuthRedirect } from "./src/auth.js";
 import { ALARM, ALARM_MINUTES, IDLE_SECONDS, badge, pickDue } from "./src/auto.js";
 import { BACKEND_URL } from "./src/config.js";
 import { createController } from "./src/controller.js";
@@ -56,6 +57,13 @@ chrome.idle?.onStateChanged.addListener((state) => {
   if (state === "active") tick().catch(() => {});
 });
 chrome.runtime.onStartup?.addListener(() => tick().catch(() => {}));
+
+// Option A login handoff: exchange single-use code for Bearer token when auth tab lands on /auth/extension/done
+chrome.tabs?.onUpdated?.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) {
+    handleAuthRedirect({ url: changeInfo.url, tabId, chrome, fetchFn: fetch, backendUrl: BACKEND_URL }).catch(() => {});
+  }
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender?.id !== chrome.runtime.id) return false;

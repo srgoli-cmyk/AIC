@@ -184,7 +184,10 @@ def sync(
 ) -> SyncResponse:
     cid, skipped = _call_fn(db.save_sync, payload, user_id=current_user.id)
     # Chunking and embedding run after the response is sent; their failures never fail the sync.
-    background.add_task(_ingest_course_job, cid, user_id=current_user.id)
+    if current_user.id == db.LOCAL_USER_ID:
+        background.add_task(ingest.ingest_course, cid)
+    else:
+        background.add_task(ingest.ingest_course, cid, user_id=current_user.id)
     # Counts what was received, not what was newly stored.
     return SyncResponse(
         course_id=cid,
@@ -378,25 +381,31 @@ def _sync_site_job(course_id: str, url: str, user_id: str = db.LOCAL_USER_ID) ->
         return {k: getattr(out, k) for k in keys}
 
     def progress(out) -> None:
-        if not db.update_site(course_id, url, "syncing", counts(out), user_id=user_id):
+        if not _call_fn(db.update_site, course_id, url, "syncing", counts(out), user_id=user_id):
             raise coursesite.SiteChanged
 
     try:
         while True:
             try:
-                out = coursesite.sync_site(course_id, url, progress=progress, user_id=user_id)
-                db.update_site(course_id, url, "done", counts(out), user_id=user_id)
+                out = _call_fn(
+                    coursesite.sync_site,
+                    course_id,
+                    url,
+                    progress=progress,
+                    user_id=user_id,
+                )
+                _call_fn(db.update_site, course_id, url, "done", counts(out), user_id=user_id)
             except coursesite.SiteChanged:
                 log.info("course site sync stopped: the site changed")
             except Exception as exc:  # a background job must record its failure, not raise it
                 log.error("course site sync failed: %s", type(exc).__name__)
-                db.update_site(course_id, url, "failed", {}, user_id=user_id)
+                _call_fn(db.update_site, course_id, url, "failed", {}, user_id=user_id)
             with _site_jobs_lock:
-                site = db.get_site(course_id, user_id=user_id)
+                site = _call_fn(db.get_site, course_id, user_id=user_id)
                 if site is None or site.url != url:
                     # Forgotten or replaced mid-sync: a file stored after that must not stay
                     # behind. The new site's job has not stored anything yet.
-                    db.delete_web_documents_except(course_id, set(), user_id=user_id)
+                    _call_fn(db.delete_web_documents_except, course_id, set(), user_id=user_id)
                 if site is None or site.url == url or site.status != "syncing":
                     _site_jobs.discard(job_key)
                     return

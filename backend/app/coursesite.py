@@ -636,7 +636,11 @@ def doc_id_for(url: str) -> str:
 
 def facts_for(course_id: str, *, user_id: str = db.LOCAL_USER_ID) -> CourseFacts | None:
     """What the backend knows about a synced course, for checking a site against it."""
-    row = db.course_facts(course_id, user_id=user_id)
+    row = (
+        db.course_facts(course_id)
+        if user_id == db.LOCAL_USER_ID
+        else db.course_facts(course_id, user_id=user_id)
+    )
     if row is None:
         return None
     code, name, term, instructors, dates = row

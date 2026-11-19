@@ -158,8 +158,13 @@ async function download(fetchFn, courseId, file) {
   }
 }
 
-async function storedVersions(fetchFn, base, courseId) {
-  const r = await fetchFn(`${base}/courses/${courseKey(courseId)}/documents`, { credentials: "omit", signal: timeoutSignal(FETCH_TIMEOUT_MS) });
+async function storedVersions(fetchFn, base, courseId, token = null) {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const r = await fetchFn(`${base}/courses/${courseKey(courseId)}/documents`, {
+    credentials: "omit",
+    headers,
+    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+  });
   if (!r.ok) throw new Error("documents");
   const list = JSON.parse(await r.text());
   return new Map((Array.isArray(list) ? list : []).filter((d) => typeof d?.doc_id === "string").map((d) => [d.doc_id, d.version]));
@@ -170,7 +175,7 @@ async function storedVersions(fetchFn, base, courseId) {
  * Returns { found, sent, unchanged, failed, unreadable, later }. Never throws: slides are an
  * extra, and a failure here must not fail the lecture sync that already succeeded.
  */
-export async function syncSlides({ fetchFn, backendUrl, courseId, files, report = () => {} }) {
+export async function syncSlides({ fetchFn, backendUrl, courseId, files, token = null, report = () => {} }) {
   const out = { found: 0, sent: 0, unchanged: 0, failed: 0, unreadable: 0, later: 0, older: 0 };
   const all = files.filter(isSlideFile);
   out.found = all.length;
@@ -180,7 +185,7 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
   let stored;
   try {
     await confirmBackend(fetchFn, backendUrl);
-    stored = await storedVersions(fetchFn, backendUrl, courseId);
+    stored = await storedVersions(fetchFn, backendUrl, courseId, token);
   } catch {
     out.failed = slides.length;
     return out;
@@ -201,10 +206,14 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
     } else {
       const query = new URLSearchParams({ name: file.display_name, version: versionOf(file) });
       try {
+        const headers = {
+          "Content-Type": "application/octet-stream",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
         const r = await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${file.id}?${query}`, {
           method: "PUT",
           credentials: "omit",
-          headers: { "Content-Type": "application/octet-stream" },
+          headers,
           body: bytes,
           signal: timeoutSignal(SLIDE_TIMEOUT_MS),
         });
@@ -224,9 +233,11 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, report 
   for (const id of older) {
     if (!stored.has(`canvas-file-${id}`) || !current.has(replacedBy.get(id))) continue;
     try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${id}`, {
         method: "DELETE",
         credentials: "omit",
+        headers,
         signal: timeoutSignal(FETCH_TIMEOUT_MS),
       });
     } catch {

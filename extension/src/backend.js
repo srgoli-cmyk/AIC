@@ -23,17 +23,21 @@ export async function confirmBackend(fetchFn, base) {
 }
 
 /** [{ entry_id, has_captions }]; a course the backend does not know has none. */
-export async function getLectures(fetchFn, base, canvasCourseId) {
+export async function getLectures(fetchFn, base, canvasCourseId, token = null) {
   await confirmBackend(fetchFn, base);
   let r;
   try {
+    // Forward bearer token when authenticated
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
     r = await fetchFn(`${base}/courses/${courseKey(canvasCourseId)}/lectures`, {
       credentials: "omit",
+      headers,
       signal: timeoutSignal(FETCH_TIMEOUT_MS),
     });
   } catch {
     throw new SyncError("BACKEND_DOWN");
   }
+  if (r.status === 401) throw new SyncError("AUTH_EXPIRED");
   if (r.status === 404) return [];
   if (!r.ok) throw new SyncError("BACKEND_REJECTED", `HTTP ${Number(r.status) | 0}`);
   let data;
@@ -54,22 +58,28 @@ export function looksLikeSession(text) {
   return KS_SHAPE.test(text);
 }
 
-export async function postSync(fetchFn, base, payload) {
+export async function postSync(fetchFn, base, payload, token = null) {
   const body = JSON.stringify(payload);
   if (looksLikeSession(body)) throw new SyncError("KS_IN_PAYLOAD");
   await confirmBackend(fetchFn, base);
   let r;
   try {
+    // Forward bearer token in Authorization header
+    const headers = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
     r = await fetchFn(`${base}/sync`, {
       method: "POST",
       credentials: "omit",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body,
       signal: timeoutSignal(SYNC_POST_TIMEOUT_MS),
     });
   } catch {
     throw new SyncError("BACKEND_DOWN");
   }
+  if (r.status === 401) throw new SyncError("AUTH_EXPIRED");
   if (!r.ok) throw new SyncError("BACKEND_REJECTED", `HTTP ${Number(r.status) | 0}`);
   // The reply only matters for its counts; a reply that cannot be read is not a failure.
   try {

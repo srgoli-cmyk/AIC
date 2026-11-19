@@ -1,5 +1,6 @@
 import { BACKEND_URL, WEB_PATH } from "./src/config.js";
 import { AUTO_KEY } from "./src/auto.js";
+import { authLoginUrl, authLogout } from "./src/auth.js";
 import { autoLine, courseLink, displayCode, formatState } from "./src/summary.js";
 
 const out = document.getElementById("out");
@@ -7,9 +8,34 @@ const status = document.getElementById("status");
 const open = document.getElementById("open");
 const auto = document.getElementById("auto");
 const autoOn = document.getElementById("auto-on");
+const authLoggedIn = document.getElementById("auth-logged-in");
+const authLoggedOut = document.getElementById("auth-logged-out");
+const userEmail = document.getElementById("user-email");
+const authLoginBtn = document.getElementById("auth-login");
+const authLogoutBtn = document.getElementById("auth-logout");
+const authErrorBox = document.getElementById("auth-error");
 let current = {};
 
 function render() {
+  // Update authentication UI elements
+  const hasAuth = Boolean(current.authToken && current.authUser);
+  authLoggedIn.hidden = !hasAuth;
+  authLoggedOut.hidden = hasAuth;
+  if (hasAuth) {
+    userEmail.textContent = current.authUser.email;
+    authErrorBox.hidden = true;
+  } else if (current.authError) {
+    const errMap = {
+      ucsd_only: "Only verified @ucsd.edu accounts are permitted.",
+      unverified_email: "Google email is not verified.",
+      exchange_failed: "Sign in exchange failed. Please try again.",
+    };
+    authErrorBox.textContent = errMap[current.authError] || "Sign in failed. Please try again.";
+    authErrorBox.hidden = false;
+  } else {
+    authErrorBox.hidden = true;
+  }
+
   status.textContent = formatState(current.syncState, current.lastSync);
   const url = current.syncState?.status === "running" ? null : courseLink(current.lastSync, BACKEND_URL, WEB_PATH);
   open.hidden = !url;
@@ -35,6 +61,14 @@ function render() {
     autoOn.checked = rec.on === true;
   }
 }
+
+authLoginBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: authLoginUrl(BACKEND_URL) });
+});
+
+authLogoutBtn.addEventListener("click", async () => {
+  await authLogout({ token: current.authToken, chrome });
+});
 
 autoOn.addEventListener("change", async () => {
   const msg =
@@ -68,16 +102,22 @@ for (const [id, type] of [
   ["sync-all", "SYNC_ALL"],
 ]) {
   document.getElementById(id).addEventListener("click", async () => {
+    if (!current.authToken) {
+      status.textContent = `Sign in with your @ucsd.edu Google account to sync courses.\n${formatState(undefined, current.lastSync)}`;
+      return;
+    }
     const res = await send(type);
     if (!res?.ok) status.textContent = `${res?.error || "Could not start."}\n${formatState(undefined, current.lastSync)}`;
   });
 }
 
+const STORAGE_KEYS = ["syncState", "lastSync", AUTO_KEY, "authToken", "authUser", "authError"];
+
 // Asking the worker first wakes it, so a sync that died is marked before the state is shown.
 // Opening the popup counts as seeing the new lectures, which clears the badge.
 send("STATUS")
   .then(() => send("SEEN"))
-  .then(() => chrome.storage.local.get(["syncState", "lastSync", AUTO_KEY]))
+  .then(() => chrome.storage.local.get(STORAGE_KEYS))
   .then((items) => {
     current = { ...current, ...items };
     render();
@@ -85,7 +125,7 @@ send("STATUS")
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  for (const key of ["syncState", "lastSync", AUTO_KEY]) {
+  for (const key of STORAGE_KEYS) {
     if (changes[key]) current[key] = changes[key].newValue;
   }
   render();

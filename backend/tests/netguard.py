@@ -36,7 +36,12 @@ def _guard_connect(original):
             raise NetworkBlocked(f"a test tried to connect to {address[0]}")
         # On Windows, connecting to port 1 hangs for 20+ seconds waiting for OS SYN retries.
         # Fail immediately with ECONNREFUSED just as Linux/macOS does for unreachable port 1.
-        if isinstance(address, tuple) and _is_local(address[0]) and len(address) > 1 and address[1] == 1:
+        if (
+            isinstance(address, tuple)
+            and _is_local(address[0])
+            and len(address) > 1
+            and address[1] == 1
+        ):
             raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
         return original(self, address, *args, **kwargs)
 
