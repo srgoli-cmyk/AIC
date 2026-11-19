@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { makeServer } from "./helpers.mjs";
 
 // background.js talks to the global chrome and fetch, so each import gets fakes first.
-async function load({ server = makeServer(), stored = {}, session = {} } = {}) {
+async function load({ server = makeServer(), stored = { authToken: "tok_test" }, session = {} } = {}) {
   let listener;
   const removed = [];
   globalThis.fetch = server.fetch;
@@ -50,6 +50,13 @@ test("PING and SYNC are routed to the controller", async () => {
   const sync = await ask(listener, { type: "SYNC" });
   assert.equal(sync.ok, false);
   assert.match(sync.error, /Open a Canvas course page/);
+});
+
+test("SYNC refuses when unauthenticated", async () => {
+  const { listener } = await load({ stored: {} });
+  const sync = await ask(listener, { type: "SYNC" });
+  assert.equal(sync.ok, false);
+  assert.match(sync.error, /Sign in with your @ucsd.edu Google account/);
 });
 
 test("a handler that throws answers with a fixed message, not the error text", async () => {

@@ -76,7 +76,7 @@ function setup(server = {}) {
   const k = makeKaf({ tracker: tracker() });
   const s = makeServer({ tracker: tracker(), ...server });
   const scripting = makeScripting([{ frameId: 1, env: k.env }]);
-  const store = {};
+  const store = { authToken: "tok_test" };
   const session = {};
   const tabs = { ...makeTabs(), query: async () => [{ url: `https://canvas.ucsd.edu/courses/${COURSE}` }] };
   const chrome = {

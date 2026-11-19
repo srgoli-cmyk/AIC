@@ -129,11 +129,14 @@ test("handleAuthRedirect records exchange_failed on non-200 exchange response", 
   assert.equal(store.authToken, undefined);
 });
 
-test("authLogout calls backend /auth/logout with Bearer token and clears storage", async () => {
+test("authLogout calls backend /auth/logout with Bearer token and clears all student session storage", async () => {
   const { chrome, store, removed } = makeChromeStorage();
   store.authToken = "tok_abc";
   store.authUser = { email: "triton@ucsd.edu" };
   store.authError = null;
+  store.lastSync = { courseId: 10, code: "CSE 150A" };
+  store.syncState = { status: "done" };
+  store.auto = { 10: { on: true } };
 
   const calls = [];
   const fetchFn = async (url, init) => {
@@ -149,7 +152,13 @@ test("authLogout calls backend /auth/logout with Bearer token and clears storage
   assert.ok(removed.includes("authToken"));
   assert.ok(removed.includes("authUser"));
   assert.ok(removed.includes("authError"));
+  assert.ok(removed.includes("lastSync"));
+  assert.ok(removed.includes("syncState"));
+  assert.ok(removed.includes("auto"));
   assert.equal(store.authToken, undefined);
+  assert.equal(store.lastSync, undefined);
+  assert.equal(store.syncState, undefined);
+  assert.equal(store.auto, undefined);
 });
 
 test("getLectures and postSync send Bearer authorization header and handle 401", async () => {

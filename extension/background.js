@@ -59,9 +59,10 @@ chrome.idle?.onStateChanged.addListener((state) => {
 chrome.runtime.onStartup?.addListener(() => tick().catch(() => {}));
 
 // Option A login handoff: exchange single-use code for Bearer token when auth tab lands on /auth/extension/done
-chrome.tabs?.onUpdated?.addListener((tabId, changeInfo) => {
-  if (changeInfo.url) {
-    handleAuthRedirect({ url: changeInfo.url, tabId, chrome, fetchFn: fetch, backendUrl: BACKEND_URL }).catch(() => {});
+chrome.tabs?.onUpdated?.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo?.url || tab?.url;
+  if (url) {
+    handleAuthRedirect({ url, tabId, chrome, fetchFn: fetch, backendUrl: BACKEND_URL }).catch(() => {});
   }
 });
 

@@ -16,8 +16,12 @@ export async function handleAuthRedirect({ url, tabId, chrome, fetchFn = fetch, 
   if (!url || typeof url !== "string") return false;
   try {
     const parsed = new URL(url);
-    const backendOrigin = new URL(backendUrl).origin;
-    if (parsed.origin === backendOrigin && parsed.pathname.endsWith("/auth/extension/done")) {
+    const backend = new URL(backendUrl);
+    const isLocalhost =
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
+      (backend.hostname === "localhost" || backend.hostname === "127.0.0.1") &&
+      parsed.port === backend.port;
+    if ((parsed.origin === backend.origin || isLocalhost) && parsed.pathname.endsWith("/auth/extension/done")) {
       const code = parsed.searchParams.get("code");
       const error = parsed.searchParams.get("error");
       if (code) {
@@ -70,5 +74,17 @@ export async function authLogout({ token, fetchFn = fetch, backendUrl = BACKEND_
       // Best-effort remote revocation
     }
   }
-  await chrome.storage.local.remove(["authToken", "authUser", "authError"]);
+  await chrome.storage.local.remove([
+    "authToken",
+    "authUser",
+    "authError",
+    "lastSync",
+    "syncState",
+    "auto",
+  ]);
+  try {
+    await chrome.action?.setBadgeText?.({ text: "" });
+  } catch {
+    // Badge cleanup is cosmetic
+  }
 }

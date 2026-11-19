@@ -42,6 +42,7 @@ function notice(title, lines, action) {
 }
 
 function show(view) {
+  if (view) $("notice").hidden = true;
   $("login-view").hidden = view !== "login";
   $("home").hidden = view !== "home";
   $("course").hidden = view !== "course";

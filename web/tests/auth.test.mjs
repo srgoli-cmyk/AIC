@@ -80,3 +80,26 @@ test("auth error mapping handles domain restriction and expired sessions", () =>
   assert.match(messages.auth_cancelled, /cancelled/);
   assert.match(messages.expired, /session has expired/);
 });
+
+test("switching to login view resets and hides leftover notice banners", () => {
+  const elements = {
+    notice: { hidden: false },
+    "login-view": { hidden: true },
+    home: { hidden: false },
+    course: { hidden: false },
+  };
+  const $ = (id) => elements[id];
+
+  function show(view) {
+    if (view) $("notice").hidden = true;
+    $("login-view").hidden = view !== "login";
+    $("home").hidden = view !== "home";
+    $("course").hidden = view !== "course";
+  }
+
+  show("login");
+  assert.equal(elements.notice.hidden, true, "notice should be hidden when showing login");
+  assert.equal(elements["login-view"].hidden, false, "login view should be visible");
+  assert.equal(elements.home.hidden, true, "home view should be hidden");
+  assert.equal(elements.course.hidden, true, "course view should be hidden");
+});

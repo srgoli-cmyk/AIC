@@ -8,6 +8,8 @@ const status = document.getElementById("status");
 const open = document.getElementById("open");
 const auto = document.getElementById("auto");
 const autoOn = document.getElementById("auto-on");
+const syncAllBtn = document.getElementById("sync-all");
+const syncBtn = document.getElementById("sync");
 const authLoggedIn = document.getElementById("auth-logged-in");
 const authLoggedOut = document.getElementById("auth-logged-out");
 const userEmail = document.getElementById("user-email");
@@ -21,6 +23,9 @@ function render() {
   const hasAuth = Boolean(current.authToken && current.authUser);
   authLoggedIn.hidden = !hasAuth;
   authLoggedOut.hidden = hasAuth;
+  syncAllBtn.hidden = !hasAuth;
+  syncBtn.hidden = !hasAuth;
+  status.hidden = !hasAuth;
   if (hasAuth) {
     userEmail.textContent = current.authUser.email;
     authErrorBox.hidden = true;
@@ -36,6 +41,14 @@ function render() {
     authErrorBox.hidden = true;
   }
 
+  if (!hasAuth) {
+    status.textContent = "";
+    open.hidden = true;
+    auto.hidden = true;
+    return;
+  }
+
+  status.hidden = false;
   status.textContent = formatState(current.syncState, current.lastSync);
   const url = current.syncState?.status === "running" ? null : courseLink(current.lastSync, BACKEND_URL, WEB_PATH);
   open.hidden = !url;
@@ -68,6 +81,12 @@ authLoginBtn.addEventListener("click", () => {
 
 authLogoutBtn.addEventListener("click", async () => {
   await authLogout({ token: current.authToken, chrome });
+  current.authToken = undefined;
+  current.authUser = undefined;
+  current.lastSync = undefined;
+  current.syncState = undefined;
+  current[AUTO_KEY] = undefined;
+  render();
 });
 
 autoOn.addEventListener("change", async () => {
@@ -103,11 +122,16 @@ for (const [id, type] of [
 ]) {
   document.getElementById(id).addEventListener("click", async () => {
     if (!current.authToken) {
-      status.textContent = `Sign in with your @ucsd.edu Google account to sync courses.\n${formatState(undefined, current.lastSync)}`;
+      status.hidden = false;
+      status.textContent = "Sign in with your @ucsd.edu Google account to sync courses.";
+      render();
       return;
     }
     const res = await send(type);
-    if (!res?.ok) status.textContent = `${res?.error || "Could not start."}\n${formatState(undefined, current.lastSync)}`;
+    if (!res?.ok) {
+      status.hidden = false;
+      status.textContent = `${res?.error || "Could not start."}\n${formatState(undefined, current.lastSync)}`;
+    }
   });
 }
 
