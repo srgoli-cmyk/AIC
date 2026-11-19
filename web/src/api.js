@@ -29,7 +29,8 @@ async function call(path, init, timeoutMs) {
   outer?.addEventListener("abort", onAbort, { once: true });
   let res;
   try {
-    res = await fetch(`${BACKEND}${path}`, { ...init, signal: ctrl.signal });
+    // Include credentials so the aic_session cookie is sent on same-origin & cross-origin dev requests
+    res = await fetch(`${BACKEND}${path}`, { credentials: "include", ...init, signal: ctrl.signal });
   } catch (e) {
     if (outer?.aborted) throw new Stopped("stopped");
     throw new BackendError(
@@ -44,15 +45,52 @@ async function call(path, init, timeoutMs) {
   try {
     body = await res.json();
   } catch {
-    throw new BackendError(`The backend returned ${res.status}.`);
+    const err = new BackendError(`The backend returned ${res.status}.`);
+    err.status = res.status;
+    throw err;
   }
   if (!res.ok) {
-    throw new BackendError(typeof body?.detail === "string" ? body.detail : `The backend returned ${res.status}.`);
+    const err = new BackendError(typeof body?.detail === "string" ? body.detail : `The backend returned ${res.status}.`);
+    err.status = res.status;
+    throw err;
   }
   return body;
 }
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Fetch profile of currently logged-in student (GET /auth/me).
+ * Returns { id, email, name } or null when unauthenticated.
+ */
+export async function me() {
+  if (demo) {
+    return { id: "usr_demo", email: "student@ucsd.edu", name: "Demo Student" };
+  }
+  try {
+    return await call("/auth/me", {}, 5000);
+  } catch (err) {
+    if (err.status === 401 || err.message === "not authenticated") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Revoke session and log out (POST /auth/logout).
+ */
+export async function logout() {
+  if (demo) return;
+  await call("/auth/logout", { method: "POST" }, 5000);
+}
+
+/**
+ * URL to initiate Google OIDC login with PKCE for web client.
+ */
+export function loginUrl() {
+  return `${BACKEND}/auth/google/login?client=web`;
+}
 
 export async function health() {
   if (demo) return true;

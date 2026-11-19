@@ -6,7 +6,7 @@ import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel, sourceUrl
 import { hideStudy, showStudy, STUDY } from "./study.js";
 import { hideSlidesPanel, showSlidesPanel } from "./site.js";
 
-const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask", stop: null };
+const state = { courses: [], course: null, section: "all", lecture: null, busy: false, mode: "ask", stop: null, user: null };
 
 // Links keep ?demo, ?backend and ?look so moving around never drops them.
 function href(params) {
@@ -39,8 +39,42 @@ function notice(title, lines, action) {
 }
 
 function show(view) {
+  $("login-view").hidden = view !== "login";
   $("home").hidden = view !== "home";
   $("course").hidden = view !== "course";
+}
+
+// User profile badge and sign out in top bar
+function updateUserHeader(user) {
+  const profile = $("user-profile");
+  if (!profile) return;
+  if (!user || api.demo) {
+    profile.hidden = true;
+    return;
+  }
+  profile.hidden = false;
+  $("user-email").textContent = user.email;
+}
+
+// Render sign-in landing screen for unauthenticated users
+function renderLogin(errorKey) {
+  document.title = "Sign In · Lecture Search";
+  show("login");
+  $("login-btn").href = api.loginUrl();
+  const errorBox = $("login-error");
+  if (errorKey) {
+    const messages = {
+      ucsd_only: "Access restricted: Only verified @ucsd.edu Google accounts are permitted. Please sign in with your official UCSD student or faculty email.",
+      unverified_email: "Your Google account email is not verified. Please verify your UCSD email with Google before signing in.",
+      google_failed: "Google authentication failed or was cancelled. Please try again.",
+      auth_cancelled: "Sign in was cancelled. Please try again.",
+      expired: "Your session has expired. Please sign in again.",
+    };
+    errorBox.textContent = messages[errorKey] || "Sign in failed. Please try again.";
+    errorBox.hidden = false;
+  } else {
+    errorBox.hidden = true;
+  }
 }
 
 // ---------- Home ----------
@@ -398,6 +432,11 @@ async function submit(e) {
 
 async function route() {
   $("notice").hidden = true;
+  // If not in demo mode and user is not authenticated, show sign-in screen
+  if (!api.demo && !state.user) {
+    renderLogin();
+    return;
+  }
   const params = new URLSearchParams(location.search);
   const courseId = params.get("course");
   if (!courseId) {
@@ -406,6 +445,12 @@ async function route() {
     try {
       state.courses = await api.courses();
     } catch (err) {
+      if (err.status === 401 || err.message === "not authenticated") {
+        state.user = null;
+        updateUserHeader(null);
+        renderLogin("expired");
+        return;
+      }
       show(null);
       notice("Couldn't load courses", [err.message]);
       return;
@@ -417,6 +462,12 @@ async function route() {
     try {
       state.course = await api.course(courseId);
     } catch (err) {
+      if (err.status === 401 || err.message === "not authenticated") {
+        state.user = null;
+        updateUserHeader(null);
+        renderLogin("expired");
+        return;
+      }
       state.course = null;
       show(null);
       const missing = err.message === "course not synced";
@@ -455,6 +506,38 @@ async function start() {
   }
   setHealth("up", api.demo ? "Demo" : "Connected");
   $("health").hidden = api.demo; // the "Demo data" badge already says it
+
+  // Check for auth errors returned from Google redirect (e.g. ?auth_error=ucsd_only)
+  const params = new URLSearchParams(location.search);
+  const authError = params.get("auth_error");
+  if (authError) {
+    params.delete("auth_error");
+    const cleanQuery = params.toString() ? `?${params.toString()}` : "";
+    history.replaceState({}, "", `${location.pathname}${cleanQuery}`);
+  }
+
+  // Demo mode skips authentication checks
+  if (api.demo) {
+    updateUserHeader(null);
+    route();
+    return;
+  }
+
+  try {
+    state.user = await api.me();
+  } catch (err) {
+    show(null);
+    notice("Authentication error", [err.message]);
+    return;
+  }
+
+  if (!state.user) {
+    updateUserHeader(null);
+    renderLogin(authError);
+    return;
+  }
+
+  updateUserHeader(state.user);
   route();
 }
 
@@ -505,6 +588,25 @@ $("answer").addEventListener("click", (e) => {
 $("home-link").addEventListener("click", (e) => {
   e.preventDefault();
   go({});
+});
+$("logout-btn")?.addEventListener("click", async () => {
+  try {
+    await api.logout();
+  } catch {
+    // Ignore network failure on logout
+  }
+  state.user = null;
+  state.course = null;
+  state.courses = [];
+  updateUserHeader(null);
+  renderLogin();
+});
+$("demo-btn")?.addEventListener("click", () => {
+  api.useDemo();
+  const p = new URLSearchParams(location.search);
+  p.set("demo", "");
+  history.replaceState({}, "", `${location.pathname}?${p.toString().replace(/demo=(&|$)/, "demo$1")}`);
+  start();
 });
 window.addEventListener("popstate", route);
 

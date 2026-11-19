@@ -101,6 +101,7 @@ export async function streamAnswer(fetchFn, url, body, { onDelta, signal } = {})
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(body),
+      credentials: "include",
       signal,
     });
   } catch (e) {
