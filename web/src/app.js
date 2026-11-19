@@ -31,11 +31,14 @@ function setHealth(s, text) {
 function notice(title, lines, action) {
   const n = $("notice");
   n.hidden = false;
-  n.replaceChildren(
+  const nodes = [
     el("h2", {}, title),
     ...lines.map((l) => el("p", {}, l)),
-    action ? el("button", { class: "link", on: { click: action.run } }, action.label) : null
-  );
+  ];
+  if (action) {
+    nodes.push(el("button", { class: "link", on: { click: action.run } }, action.label));
+  }
+  n.replaceChildren(...nodes);
 }
 
 function show(view) {
