@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import DateTime, ForeignKey, Text, delete, select
+from sqlalchemy import DateTime, ForeignKey, Text, delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -216,6 +216,124 @@ def consume_extension_code(raw_code: str) -> UserRecord | None:
             return None
         user = session.get(User, user_id)
         return _to_record(user) if user else None
+
+
+class ClaimRefused(Exception):
+    """The claim was refused and nothing was changed. The message is safe to print: it holds only
+    fixed text, the email the operator typed, and course ids."""
+
+
+# Tables moved by claim_local_data, in the order they are reported.
+CLAIM_TABLES = ("courses", "lectures", "files", "documents", "course_sites", "chunks", "doc_chunks")
+
+# Copy statements in foreign-key order (parents before children). Every column is listed so the
+# copy keeps all data; `chunks` and `doc_chunks` omit `id`, so the copies get fresh ids.
+_CLAIM_COPY_SQL = {
+    "courses": """
+        INSERT INTO courses (user_id, course_id, canvas_course_id, code, name, term, term_start,
+                             term_end, instructors, sections, synced_at, indexed)
+        SELECT :target, course_id, canvas_course_id, code, name, term, term_start,
+               term_end, instructors, sections, synced_at, indexed
+        FROM courses WHERE user_id = :local""",
+    "lectures": """
+        INSERT INTO lectures (user_id, entry_id, course_id, title, lecture_no, section,
+                              recorded_at, recorded_start, duration_sec, media_url, captions_srt,
+                              summary, chunked_hash)
+        SELECT :target, entry_id, course_id, title, lecture_no, section, recorded_at,
+               recorded_start, duration_sec, media_url, captions_srt, summary, chunked_hash
+        FROM lectures WHERE user_id = :local""",
+    "files": """
+        INSERT INTO files (user_id, canvas_file_id, course_id, name, content_type)
+        SELECT :target, canvas_file_id, course_id, name, content_type
+        FROM files WHERE user_id = :local""",
+    "documents": """
+        INSERT INTO documents (user_id, doc_id, course_id, source, name, url, version,
+                               content_hash, pages, lecture_no, synced_at)
+        SELECT :target, doc_id, course_id, source, name, url, version, content_hash, pages,
+               lecture_no, synced_at
+        FROM documents WHERE user_id = :local""",
+    "course_sites": """
+        INSERT INTO course_sites (user_id, course_id, url, title, chosen_by, status, found,
+                                  stored, unchanged, unreadable, failed, updated_at)
+        SELECT :target, course_id, url, title, chosen_by, status, found, stored, unchanged,
+               unreadable, failed, updated_at
+        FROM course_sites WHERE user_id = :local""",
+    "chunks": """
+        INSERT INTO chunks (user_id, entry_id, start_sec, end_sec, text, embedding)
+        SELECT :target, entry_id, start_sec, end_sec, text, embedding
+        FROM chunks WHERE user_id = :local ORDER BY id""",
+    "doc_chunks": """
+        INSERT INTO doc_chunks (user_id, doc_id, page, text, embedding)
+        SELECT :target, doc_id, page, text, embedding
+        FROM doc_chunks WHERE user_id = :local ORDER BY id""",
+}
+
+# Course ids (of usr_local rows) that would collide with a row the target user already has.
+# Checks every key the copy could violate: the course key, the (user, canvas course) uniqueness,
+# and the lecture, document and file keys.
+_CLAIM_CONFLICT_SQL = """
+    SELECT l.course_id FROM courses l JOIN courses t
+        ON t.user_id = :target AND (t.course_id = l.course_id
+                                    OR t.canvas_course_id = l.canvas_course_id)
+        WHERE l.user_id = :local
+    UNION
+    SELECT l.course_id FROM lectures l JOIN lectures t
+        ON t.user_id = :target AND t.entry_id = l.entry_id WHERE l.user_id = :local
+    UNION
+    SELECT l.course_id FROM documents l JOIN documents t
+        ON t.user_id = :target AND t.doc_id = l.doc_id WHERE l.user_id = :local
+    UNION
+    SELECT l.course_id FROM files l JOIN files t
+        ON t.user_id = :target AND t.canvas_file_id = l.canvas_file_id WHERE l.user_id = :local
+    ORDER BY 1"""
+
+
+def claim_local_data(email: str, *, dry_run: bool) -> dict:
+    """Move everything owned by `usr_local` (data from before login) to the user with this email.
+
+    One transaction: any refusal or error changes nothing. Raises ClaimRefused when the email has
+    no account (the student must sign in once first), when it is usr_local itself, or when the
+    target already holds a course, lecture, document or file with the same key. Returns
+    {"dry_run": bool, "email": str, "user_id": str, "moved": {table: count}}; with dry_run the
+    counts are what would move and nothing is written.
+
+    The foreign keys have no ON UPDATE CASCADE, so rows cannot simply be re-keyed. Instead each
+    table is copied in foreign-key order, then the usr_local courses are deleted and ON DELETE
+    CASCADE removes every remaining usr_local row. Chunks keep text, times and embeddings."""
+    db.ensure_schema()
+    wanted = email.lower()
+    params = {"local": db.LOCAL_USER_ID}
+    with Session(db.engine) as session, session.begin():
+        target = session.execute(select(User.id).where(User.email == wanted)).scalar_one_or_none()
+        if target is None:
+            raise ClaimRefused(f"No account for {email}. Sign in once with that address first.")
+        if target == db.LOCAL_USER_ID:
+            raise ClaimRefused("That address is the placeholder local account. Use your own.")
+        params["target"] = target
+
+        # Lock the courses being moved so a sync or ingest cannot change them mid-copy.
+        session.execute(
+            text("SELECT 1 FROM courses WHERE user_id = :local FOR UPDATE"), params
+        ).all()
+        clashes = session.execute(text(_CLAIM_CONFLICT_SQL), params).scalars().all()
+        if clashes:
+            raise ClaimRefused(
+                "Nothing moved. This account already has data with the same keys as: "
+                + ", ".join(clashes)
+            )
+
+        moved: dict[str, int] = {}
+        for table in CLAIM_TABLES:
+            if dry_run:
+                # Table names come from the fixed tuple above, never from input.
+                count_sql = f"SELECT count(*) FROM {table} WHERE user_id = :local"  # noqa: S608
+                moved[table] = session.execute(text(count_sql), params).scalar_one()
+            else:
+                moved[table] = session.execute(text(_CLAIM_COPY_SQL[table]), params).rowcount
+        if not dry_run and moved["courses"]:
+            # Cascades to lectures, files, documents, course_sites, chunks and doc_chunks.
+            session.execute(delete(db.Course).where(db.Course.user_id == db.LOCAL_USER_ID))
+    return {"dry_run": dry_run, "email": wanted, "user_id": target, "moved": moved}
 
 
 def purge_expired() -> tuple[int, int]:

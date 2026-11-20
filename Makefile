@@ -1,4 +1,4 @@
-.PHONY: setup db db-reset dev web start check smoke
+.PHONY: setup db db-reset dev web start check smoke claim-local-data
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -32,3 +32,9 @@ check:
 
 smoke:
 	BASE_URL="$${BASE_URL:-http://localhost:$(PORT)}" bash scripts/smoke.sh
+
+# One time, after your first sign-in: move the data synced before login existed to your account.
+# Add DRY_RUN=1 to only count what would move.
+claim-local-data:
+	@test -n "$(EMAIL)" || { echo "Usage: make claim-local-data EMAIL=you@ucsd.edu [DRY_RUN=1]"; exit 2; }
+	cd backend && ../$(VENV)/bin/python -m app.claim_local_data --email "$(EMAIL)" $(if $(DRY_RUN),--dry-run,)
