@@ -16,7 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
@@ -572,3 +572,28 @@ def study_lecture(
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 if WEB_DIR.is_dir():
     app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="app")
+
+# The public pages: the landing page at / and the privacy policy at /privacy, with their assets
+# under /site/. No login. The files are read on each request; a missing file is a plain 404.
+SITE_DIR = WEB_DIR / "site"
+
+
+def _site_page(name: str) -> FileResponse:
+    path = SITE_DIR / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(path, media_type="text/html")
+
+
+@app.get("/", include_in_schema=False)
+def landing_page() -> FileResponse:
+    return _site_page("index.html")
+
+
+@app.get("/privacy", include_in_schema=False)
+def privacy_page() -> FileResponse:
+    return _site_page("privacy.html")
+
+
+# check_dir=False: the directory may be added after the app starts (and tests have none).
+app.mount("/site", StaticFiles(directory=SITE_DIR, check_dir=False), name="site")

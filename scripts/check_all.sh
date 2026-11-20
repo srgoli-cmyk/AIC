@@ -31,7 +31,7 @@ node --check scripts/console_sync.js
 node --test scripts/console_sync.test.mjs
 
 echo "== web: syntax and render tests"
-for f in web/src/*.js; do node --check "$f"; done
+for f in web/src/*.js web/site/*.js; do node --check "$f"; done
 node --test web/tests/*.test.mjs
 
 echo "== scripts: shell syntax"

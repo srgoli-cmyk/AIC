@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy · AI Lecture Search</title>
+    <link rel="stylesheet" href="/site/site.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="brand" href="/"><span class="dot"></span>AI Lecture Search</a>
+        <nav><a href="/">Home</a><a href="/app/">Open the app</a></nav>
+      </header>
+
+      <main>
+        <h1>Privacy</h1>
+        <p class="muted">Last updated November 2026.</p>
+
+        <h2>What we store</h2>
+        <ul>
+          <li>Your UCSD email address and name, from your Google sign-in.</li>
+          <li>
+            The course material you sync with the extension: course details (code, name, term, instructors,
+            sections), lecture titles, dates and captions, the list of course files, and the text of the slide
+            files (PDF and PowerPoint) you sync. If you pick a course website, the text of its lecture pages.
+          </li>
+          <li>Search data made from that material, so questions can find the right passages.</li>
+          <li>Your sign-in sessions, stored only as a one-way hash, and when you last signed in.</li>
+        </ul>
+        <p>Each student's courses are stored separately. No other student can see yours.</p>
+
+        <h2>What we don't store</h2>
+        <ul>
+          <li>Passwords. Google checks who you are; we never see your password.</li>
+          <li>Google access or refresh tokens, and anything else from your Google account.</li>
+          <li>Your Canvas cookies or Kaltura session keys. They stay in your browser.</li>
+          <li>Your questions and the answers. They are not saved or logged.</li>
+        </ul>
+
+        <h2>Where it is stored, and who else sees it</h2>
+        <ul>
+          <li>
+            In a database on a server we run, which only this app can reach. Backups of it are kept for 7 days.
+          </li>
+          <li>
+            When you ask a question or use a study tool, the question and the passages found for it are sent to
+            <a href="https://openrouter.ai/privacy">OpenRouter</a>, which passes them to an AI model to write the
+            answer. Scanned slide pages are sent the same way to be read.
+          </li>
+          <li>Sign-in goes through Google.</li>
+          <li>We do not sell or share your data with anyone else, and we use no ads or tracking.</li>
+        </ul>
+
+        <h2>Deleting your data</h2>
+        <p>
+          Deleting your account removes your email, name, sessions and every course, lecture, caption, slide and
+          search entry stored for you, at once. Copies in backups are gone within 7 days. Signing out of the
+          extension also deletes what it keeps in your browser.
+        </p>
+        <div class="card" id="delete-card">
+          <p id="delete-status">Checking whether you are signed in…</p>
+          <button class="cta danger" id="delete-btn" type="button" hidden>Delete my account and data</button>
+        </div>
+      </main>
+
+      <footer><a href="/">AI Lecture Search</a> · a student project at UC San Diego, not run by UC San Diego.</footer>
+    </div>
+    <script type="module" src="/site/privacy.js"></script>
+  </body>
+</html>
