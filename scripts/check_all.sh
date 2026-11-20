@@ -18,6 +18,11 @@ echo "== extension: unit tests (incl. no-secrets test)"
 echo "== extension: manifest permissions"
 python3 scripts/check_manifest.py
 
+echo "== extension: production build"
+prod_zip=$(mktemp -d)/extension-prod.zip
+python3 scripts/build_extension_prod.py --domain ailecture.app --out "$prod_zip"
+python3 scripts/check_manifest.py --prod "$prod_zip" --domain ailecture.app
+
 echo "== extension: payload matches the contract"
 node extension/tests/emit_payload.mjs | python3 scripts/validate_payload.py
 

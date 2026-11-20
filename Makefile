@@ -1,4 +1,4 @@
-.PHONY: setup db db-reset dev web start check smoke claim-local-data dev-session
+.PHONY: setup db db-reset dev web start check smoke claim-local-data dev-session extension-prod
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -45,3 +45,11 @@ claim-local-data:
 dev-session:
 	@test -n "$(EMAIL)" || { echo "Usage: make dev-session EMAIL=smoke-test@ucsd.edu [TTL_HOURS=1]" >&2; exit 2; }
 	@cd backend && ../$(VENV)/bin/python -m app.dev_session --email "$(EMAIL)" $(if $(TTL_HOURS),--ttl-hours $(TTL_HOURS),)
+
+# The Chrome Web Store build: dist/extension-prod.zip, pointing at https://$(DOMAIN). The dev build in
+# extension/ stays as it is.
+DOMAIN ?=
+extension-prod:
+	@test -n "$(DOMAIN)" || { echo "Usage: make extension-prod DOMAIN=ailecture.app" >&2; exit 2; }
+	python3 scripts/build_extension_prod.py --domain "$(DOMAIN)"
+	python3 scripts/check_manifest.py --prod dist/extension-prod.zip --domain "$(DOMAIN)"

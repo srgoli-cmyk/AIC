@@ -1,0 +1,16 @@
+# The backend image needs only the backend code and the course page it serves. Everything else is
+# left out, so .env, data/, real courses, keys and the git history never reach an image.
+*
+!backend/app
+!backend/db
+!backend/pyproject.toml
+!backend/requirements.txt
+!backend/requirements-ml.txt
+!web
+
+**/__pycache__
+**/*.pyc
+web/tests
+web/node_modules
+web/package.json
+**/CLAUDE.md
