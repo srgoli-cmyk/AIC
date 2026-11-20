@@ -26,10 +26,12 @@ export async function runAllSync(deps) {
   let pending = 0;
   let lastError;
 
+  // Signed out: stop before any request.
+  if (!deps.token) throw new SyncError("AUTH_EXPIRED");
   report({ stage: "backend", done: 0, total: 0 });
   await confirmBackend(fetchFn, backendUrl);
   // Once for the whole run, before any Canvas request; the per-course syncs skip their own check.
-  if (deps.token) await confirmSession(fetchFn, backendUrl, deps.token);
+  await confirmSession(fetchFn, backendUrl, deps.token);
 
   report({ stage: "canvas", done: 0, total: 0 });
   let mine;

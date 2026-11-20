@@ -97,11 +97,14 @@ async function handleOne({ url, tabId, chrome, fetchFn = fetch, backendUrl = BAC
     return false;
   }
 
+  const code = parsed.searchParams.get("code");
+  const error = parsed.searchParams.get("error");
+  // A bare done page carries nothing to act on: keep the pending login and leave the tab alone.
+  if (!code && !error) return false;
+
   // One attempt only: clear before awaiting the exchange.
   await chrome.storage.session.remove(PENDING_KEY);
 
-  const code = parsed.searchParams.get("code");
-  const error = parsed.searchParams.get("error");
   if (code) {
     try {
       const res = await fetchFn(`${backendUrl}/auth/extension/exchange`, {

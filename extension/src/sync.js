@@ -159,10 +159,12 @@ export async function runSync(deps) {
   const notes = [];
   const skipped = {};
 
+  // Signed out: stop before any request, tab or injected call.
+  if (!token) throw new SyncError("AUTH_EXPIRED");
   report({ stage: "backend", done: 0, total: 0 });
   await confirmBackend(fetchFn, backendUrl);
   // An expired session stops here, before Canvas or Kaltura is touched. Sync all checks it once.
-  if (token && !deps.sessionChecked) await confirmSession(fetchFn, backendUrl, token);
+  if (!deps.sessionChecked) await confirmSession(fetchFn, backendUrl, token);
 
   report({ stage: "course", done: 0, total: 0 });
   let course;

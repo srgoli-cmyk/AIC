@@ -259,6 +259,23 @@ test("handleAuthRedirect records error parameter and closes tab", async () => {
   assert.deepEqual(closedTabs, [99]);
 });
 
+test("a bare done page (no code, no error) keeps the pending login and leaves the tab open", async () => {
+  const h = makeChromeStorage();
+  withPending(h);
+  const closed = [];
+  h.chrome.tabs = { remove: async (id) => closed.push(id) };
+  const { requests, fetchFn } = counter();
+  const handled = await call(h, fetchFn, { url: `${BASE}/auth/extension/done` });
+  assert.equal(handled, false);
+  assert.ok(h.session[PENDING_KEY], "pending login still there");
+  assert.deepEqual(closed, []);
+  assert.deepEqual(requests, []);
+  assert.equal(h.store.authError, undefined);
+  // The real redirect afterwards still works.
+  assert.equal(await call(h, fetchFn), true);
+  assert.equal(h.store.authToken, "ext_tok");
+});
+
 test("handleAuthRedirect passes only known backend error keys through, else login_failed", async () => {
   for (const [given, stored] of [["login_failed", "login_failed"], ["ucsd_only", "ucsd_only"], ["network_error", "login_failed"], ["<b>x</b>", "login_failed"], ["unverified_email", "login_failed"]]) {
     const h = makeChromeStorage();

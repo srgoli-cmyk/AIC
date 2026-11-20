@@ -273,6 +273,7 @@ export function baseDeps({ server, scripting, tabs = makeTabs(), clock = fakeClo
     tabs,
     scripting,
     backendUrl: "http://localhost:8000",
+    token: "test_session_token",
     now: () => Date.parse("2026-11-03T12:00:00Z") + clock.now(),
     sleep: clock.sleep,
     report: () => {},
