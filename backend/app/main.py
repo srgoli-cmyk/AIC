@@ -20,7 +20,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
-from . import answer, auth, auth_db, coursesite, db, embeddings, ingest, slides, study
+from . import (
+    answer,
+    auth,
+    auth_db,
+    coursesite,
+    db,
+    embeddings,
+    ingest,
+    logredact,
+    slides,
+    study,
+)
 from .config import allowed_host_list, extension_origin, settings
 from .origin import OriginCheckMiddleware
 from .schemas import (
@@ -52,6 +63,8 @@ if not log.handlers:
     _handler.setFormatter(logging.Formatter("%(levelname)s:     [%(name)s] %(message)s"))
     log.addHandler(_handler)
 log.setLevel(logging.INFO)
+# The uvicorn access log has URLs with one-time codes and OAuth state; redact them (logredact.py).
+logredact.install()
 
 # Connection-level failures (server down, refused, dropped). Their text can contain the
 # connection string or bound parameters, so it is never logged or returned.

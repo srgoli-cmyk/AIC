@@ -19,7 +19,7 @@ db-reset:
 	docker compose up -d db
 
 dev:
-	cd backend && ../$(VENV)/bin/uvicorn app.main:app --reload --port $(PORT) --no-access-log
+	cd backend && ../$(VENV)/bin/uvicorn app.main:app --reload --port $(PORT)
 
 web:
 	python3 -m http.server 5173 --bind 127.0.0.1 --directory web
