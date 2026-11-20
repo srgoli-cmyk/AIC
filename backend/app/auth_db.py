@@ -15,6 +15,7 @@ from typing import Literal
 
 from sqlalchemy import DateTime, ForeignKey, Text, delete, select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import db
@@ -77,36 +78,56 @@ def _to_record(user: User) -> UserRecord:
     return UserRecord(id=user.id, email=user.email, name=user.name)
 
 
+class EmailInUse(Exception):
+    """The email already belongs to another user, so this login was refused and nothing was
+    created or changed. No message: the address must never end up in a log."""
+
+
 def upsert_user(google_sub: str, email: str, name: str) -> UserRecord:
     """Create a UCSD student account on first login, or update email/name/last_login_at on repeat
-    logins. Keyed by Google's permanent `sub` claim."""
+    logins. Keyed by Google's permanent `sub` claim.
+
+    Raises EmailInUse when the email already belongs to a user with a different `sub` (a recycled
+    address, the `usr_local` seed, or a placeholder from `create_local_session`) or when a known
+    `sub` now reports an address another user holds. The insert or update fails as one statement,
+    so nothing is written.
+
+    A `local-cli:` placeholder is deliberately NOT adopted by the first real login with its
+    address. Adopting would let whoever ran `dev_session` for that address pre-seed data (and
+    sessions) in the account of the person who later signs in. The placeholder's owner has to
+    be dealt with by hand, for example by deleting that user."""
     db.ensure_schema()
     now = datetime.now(UTC)
     normalized_email = email.strip().lower()
     display_name = name.strip() or normalized_email.split("@", 1)[0]
-    with Session(db.engine) as session, session.begin():
-        stmt = (
-            insert(User)
-            .values(
-                id=_new_id("usr"),
-                google_sub=google_sub,
-                email=normalized_email,
-                name=display_name,
-                created_at=now,
-                last_login_at=now,
-            )
-            .on_conflict_do_update(
-                index_elements=[User.google_sub],
-                set_={
-                    "email": normalized_email,
-                    "name": display_name,
-                    "last_login_at": now,
-                },
-            )
-            .returning(User.id, User.email, User.name)
+    stmt = (
+        insert(User)
+        .values(
+            id=_new_id("usr"),
+            google_sub=google_sub,
+            email=normalized_email,
+            name=display_name,
+            created_at=now,
+            last_login_at=now,
         )
-        row = session.execute(stmt).one()
-        return UserRecord(id=row[0], email=row[1], name=row[2])
+        .on_conflict_do_update(
+            index_elements=[User.google_sub],
+            set_={
+                "email": normalized_email,
+                "name": display_name,
+                "last_login_at": now,
+            },
+        )
+        .returning(User.id, User.email, User.name)
+    )
+    try:
+        with Session(db.engine) as session, session.begin():
+            row = session.execute(stmt).one()
+            return UserRecord(id=row[0], email=row[1], name=row[2])
+    except IntegrityError:
+        # `google_sub` conflicts are handled by ON CONFLICT above, so the only unique rule left
+        # that can fire is UNIQUE(email). The driver's message holds the address; drop it.
+        raise EmailInUse from None
 
 
 def get_user(user_id: str) -> UserRecord | None:

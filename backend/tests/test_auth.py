@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app import auth, auth_db, db
@@ -354,6 +354,41 @@ def test_callback_succeeds_for_web_client(monkeypatch):
         "email": "triton@ucsd.edu",
         "name": "King Triton",
     }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("client_type", ["web", "extension"])
+def test_callback_with_an_email_of_another_user_is_login_failed_not_500(
+    monkeypatch, caplog, client_type
+):
+    """A new Google sub whose email is already taken (here by the usr_local seed)."""
+    _mock_google(monkeypatch, "sub-newcomer", "local@ucsd.edu")
+    payload = {"state": "s1", "verifier": "v", "client": client_type, "ts": time.time()}
+    if client_type == "extension":
+        payload["challenge"] = CHALLENGE
+    client.cookies.clear()
+    client.cookies.set(auth.OAUTH_STATE_COOKIE, auth.sign_oauth_state(payload))
+    with caplog.at_level("DEBUG", logger="aic"):
+        r = client.get("/auth/google/callback?code=c&state=s1", follow_redirects=False)
+    assert r.status_code == 302
+    expected = (
+        "/auth/extension/done?error=login_failed"
+        if client_type == "extension"
+        else "/app/?auth_error=login_failed"
+    )
+    assert r.headers["location"] == expected
+    assert auth.SESSION_COOKIE_NAME not in r.cookies
+    # The reason is logged as a fixed word, never the address.
+    assert "email_in_use" in caplog.text
+    assert "local@ucsd.edu" not in caplog.text
+    with Session(db.engine) as session:
+        assert (
+            session.execute(
+                select(auth_db.User).where(auth_db.User.google_sub == "sub-newcomer")
+            ).first()
+            is None
+        )
+        assert session.execute(select(func.count(auth_db.UserSession.id))).scalar_one() == 0
 
 
 @pytest.mark.integration

@@ -388,7 +388,12 @@ async def google_callback(
         return _error_redirect(client_type, "login_failed")
 
     name = str(claims.get("name", "")).strip() or email.split("@")[0]
-    user = auth_db.upsert_user(google_sub=google_sub, email=email, name=name)
+    try:
+        user = auth_db.upsert_user(google_sub=google_sub, email=email, name=name)
+    except auth_db.EmailInUse:
+        # Fixed reason only: never log the email.
+        log.warning("login refused: reason=email_in_use")
+        return _error_redirect(client_type, "login_failed")
 
     # Success: extension gets a short-lived one-time code; web gets a session cookie.
     if client_type == "extension":
