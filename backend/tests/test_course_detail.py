@@ -103,9 +103,12 @@ def test_search_can_be_limited_to_one_lecture():
     _sync(SAMPLE)
     vector = [0.0] * db.EMBEDDING_DIM
     vector[0] = 1.0
-    everything = {h.entry_id for h in db.search_chunks(CID, vector, 40)}
+    uid = db.LOCAL_USER_ID
+    everything = {h.entry_id for h in db.search_chunks(CID, vector, 40, user_id=uid)}
     assert everything == {"1_fake0001", "1_fake0002"}
-    only = {h.entry_id for h in db.search_chunks(CID, vector, 40, entry_id="1_fake0002")}
+    only = {
+        h.entry_id for h in db.search_chunks(CID, vector, 40, entry_id="1_fake0002", user_id=uid)
+    }
     assert only == {"1_fake0002"}
 
 

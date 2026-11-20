@@ -150,7 +150,7 @@ def choose(pages: list[Page], captions: list[str]) -> list[Page]:
 
 
 def slide_pages_for(
-    entry_id: str, lecture: list[db.ChunkHit], *, user_id: str = db.LOCAL_USER_ID
+    entry_id: str, lecture: list[db.ChunkHit], *, user_id: str
 ) -> list[db.ChunkHit]:
     """The slide pages that go with this lecture, as passages, or [] when none clearly do."""
     course_id = db.lecture_course(entry_id, user_id=user_id)

@@ -54,9 +54,11 @@ class FakeLLM:
 def lecture(monkeypatch):
     """A synced lecture with two chunks and a key set; returns a function that sets the replies."""
     monkeypatch.setattr(study, "settings", replace(study.settings, openrouter_api_key=FAKE_KEY))
-    monkeypatch.setattr(db, "lecture_exists", lambda entry_id: entry_id == ENTRY)
-    monkeypatch.setattr(db, "lecture_chunks", lambda entry_id: HITS)
-    monkeypatch.setattr(study.slidematch, "slide_pages_for", lambda entry_id, chunks: [])
+    monkeypatch.setattr(db, "lecture_exists", lambda entry_id, *, user_id: entry_id == ENTRY)
+    monkeypatch.setattr(db, "lecture_chunks", lambda entry_id, *, user_id: HITS)
+    monkeypatch.setattr(
+        study.slidematch, "slide_pages_for", lambda entry_id, chunks, *, user_id: []
+    )
 
     def reply_with(*replies):
         fake = FakeLLM(*replies)
@@ -398,15 +400,17 @@ def test_unknown_lecture_bad_kind_and_extra_fields(lecture):
 
 def test_a_lecture_with_no_chunks_is_a_409(lecture, monkeypatch):
     llm = lecture()
-    monkeypatch.setattr(db, "lecture_chunks", lambda entry_id: [])
+    monkeypatch.setattr(db, "lecture_chunks", lambda entry_id, *, user_id: [])
     r = _study("teach")
     assert (r.status_code, r.json()) == (409, {"detail": "lecture not indexed"})
     assert llm.calls == []
 
 
 def test_without_a_key_it_is_a_503_before_anything_is_read(monkeypatch):
-    monkeypatch.setattr(db, "lecture_exists", lambda entry_id: True)
-    monkeypatch.setattr(db, "lecture_chunks", lambda entry_id: pytest.fail("read without a key"))
+    monkeypatch.setattr(db, "lecture_exists", lambda entry_id, *, user_id: True)
+    monkeypatch.setattr(
+        db, "lecture_chunks", lambda entry_id, *, user_id: pytest.fail("read without a key")
+    )
     r = _study("teach")
     assert (r.status_code, r.json()) == (503, {"detail": "answer service not configured"})
 
@@ -474,12 +478,14 @@ def test_lecture_chunks_come_back_in_spoken_order():
     sample = json.loads((db_root() / "contracts/fixtures/sync_sample.json").read_text())
     assert client.post("/sync", json=sample).status_code == 200
     entry = sample["lectures"][0]["entry_id"]
-    chunks = db.lecture_chunks(entry)
+    chunks = db.lecture_chunks(entry, user_id=db.LOCAL_USER_ID)
     assert chunks, "ingestion ran after the sync"
     assert [c.start_sec for c in chunks] == sorted(c.start_sec for c in chunks)
     assert {c.entry_id for c in chunks} == {entry} and chunks[0].lecture_title
-    assert db.lecture_exists(entry) and not db.lecture_exists("1_nothere0")
-    assert db.lecture_chunks("1_nothere0") == []
+    uid = db.LOCAL_USER_ID
+    assert db.lecture_exists(entry, user_id=uid)
+    assert not db.lecture_exists("1_nothere0", user_id=uid)
+    assert db.lecture_chunks("1_nothere0", user_id=uid) == []
 
 
 def db_root():

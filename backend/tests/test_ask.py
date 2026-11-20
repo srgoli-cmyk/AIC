@@ -21,6 +21,8 @@ from app import answer, db, embeddings, ingest
 from app.main import app
 from app.schemas import AskResponse
 
+UID = db.LOCAL_USER_ID
+
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLE = json.loads((ROOT / "contracts/fixtures/sync_sample.json").read_text())
 ASK_SAMPLE = json.loads((ROOT / "contracts/fixtures/ask_response_sample.json").read_text())
@@ -378,7 +380,7 @@ def pipeline(monkeypatch, with_key):
     fake = FakeLLM()
     monkeypatch.setattr(answer.embeddings, "embed_query", lambda q: [0.0])
 
-    def search(course_id, vector, limit):
+    def search(course_id, vector, limit, *, user_id):
         seen["limit"] = limit
         return hits
 
@@ -390,7 +392,7 @@ def pipeline(monkeypatch, with_key):
 
 def test_long_answer_keeps_math_and_valid_citations_and_drops_the_invalid_one(pipeline):
     pipeline.reply = LONG_REPLY
-    result = answer.answer_question(CID, "q", 12)
+    result = answer.answer_question(CID, "q", 12, user_id=UID)
     assert "[Lecture 99" not in result.answer
     assert result.answer == LONG_REPLY.replace(" [Lecture 99, 0:10]", "")
     for kept in ("$[a, b]$", "$f'(x)g(x) + f(x)g'(x)$", "[Lecture 8, 0:00]", "[Lecture 9, 0:00]"):
@@ -409,14 +411,14 @@ def test_long_answer_keeps_math_and_valid_citations_and_drops_the_invalid_one(pi
 )
 def test_reply_without_a_valid_citation_is_the_fixed_message(pipeline, reply):
     pipeline.reply = reply
-    result = answer.answer_question(CID, "q", 12)
+    result = answer.answer_question(CID, "q", 12, user_id=UID)
     assert result.answer == "The lectures don't cover this."
     assert result.sources == []
 
 
 def test_a_link_is_left_for_the_ui_to_strip_and_the_citation_still_counts(pipeline):
     pipeline.reply = "See [click](https://evil.example) for more [Lecture 8, 0:00]."
-    result = answer.answer_question(CID, "q", 12)
+    result = answer.answer_question(CID, "q", 12, user_id=UID)
     assert result.answer == pipeline.reply
     assert [s.entry_id for s in result.sources] == ["1_a"]
 
@@ -426,9 +428,9 @@ def test_default_top_k_is_12_and_that_many_passages_reach_the_model(pipeline, mo
 
     assert AskRequest(course_id="c", question="q").top_k == 12
     many = [_hit(f"1_{i}", no=i, start=0.0) for i in range(1, 21)]
-    monkeypatch.setattr(answer.db, "search_chunks", lambda c, v, n: many)
+    monkeypatch.setattr(answer.db, "search_chunks", lambda c, v, n, *, user_id: many)
     pipeline.reply = "x [Lecture 1, 0:00]"
-    answer.answer_question(CID, "q", AskRequest(course_id="c", question="q").top_k)
+    answer.answer_question(CID, "q", AskRequest(course_id="c", question="q").top_k, user_id=UID)
     assert pipeline.user_prompt.count("Citation: [") == 12
 
 
@@ -693,7 +695,7 @@ def test_answer_made_only_of_unfounded_citations_gets_a_plain_text(llm):
 
 @pytest.mark.integration
 def test_course_with_no_chunks_answers_without_calling_the_model(llm, monkeypatch):
-    monkeypatch.setattr(ingest, "ingest_course", lambda course_id: None)
+    monkeypatch.setattr(ingest, "ingest_course", lambda course_id, *, user_id: None)
     _sync()
     r = _ask()
     assert r.status_code == 200
@@ -708,7 +710,7 @@ def test_course_with_lectures_still_indexing_answers_from_existing_chunks(llm, m
     extra = copy.deepcopy(payload["lectures"][0])
     extra["entry_id"] = "1_fake0003"
     payload["lectures"].append(extra)
-    monkeypatch.setattr(ingest, "ingest_course", lambda course_id: None)
+    monkeypatch.setattr(ingest, "ingest_course", lambda course_id, *, user_id: None)
     _sync(payload)  # lecture 3 is stored but not chunked; indexed is false
     assert _ask().status_code == 200
     assert len(llm.calls) == 1
@@ -920,7 +922,7 @@ def test_other_courses_chunks_do_not_crowd_the_vector_index_scan(monkeypatch, ca
 
     monkeypatch.setattr(db, "engine", index_engine)
     with caplog.at_level(logging.INFO, logger="aic"):
-        hits = db.search_chunks(mine, q, 40)
+        hits = db.search_chunks(mine, q, 40, user_id=UID)
     # All 40 rows are mine, though 600 chunks of another course are closer to the question. (The
     # approximate index scan may return fewer; the exact retry then completes the list.)
     assert len(hits) == 40 and all(h.entry_id.startswith("1_mine") for h in hits)
@@ -951,7 +953,7 @@ def test_exact_scan_runs_when_the_index_gives_up_early(llm, monkeypatch, caplog)
     # The index may only look at 10 entries, so it returns nothing for course 502.
     monkeypatch.setattr(db, "engine", _index_engine("-c hnsw.max_scan_tuples=10"))
     with caplog.at_level(logging.INFO, logger="aic"):
-        hits = db.search_chunks(mine, q, 40)
+        hits = db.search_chunks(mine, q, 40, user_id=UID)
     assert len(hits) == 40 and all(h.entry_id.startswith("1_mine") for h in hits)
     assert "used an exact scan" in caplog.text
 
@@ -992,8 +994,8 @@ def test_old_pgvector_is_warned_about_once(monkeypatch, caplog):
     monkeypatch.setattr(db, "_version_at_least", lambda *a: False)
     monkeypatch.setattr(db, "_warned_old_pgvector", False)
     with caplog.at_level(logging.WARNING, logger="aic"):
-        db.search_chunks(cid, q, 40)
-        db.search_chunks(cid, q, 40)
+        db.search_chunks(cid, q, 40, user_id=UID)
+        db.search_chunks(cid, q, 40, user_id=UID)
     assert caplog.text.count("has no iterative index scan") == 1
 
 

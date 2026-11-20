@@ -306,7 +306,7 @@ def store(
     lecture_no: int | None = None,
     pages: list[str] | None = None,
     ocr: bool = False,
-    user_id: str = db.LOCAL_USER_ID,
+    user_id: str,
 ) -> tuple[int, int]:
     """Read the file and store its chunks without embeddings (embed_document adds them).
     `pages` gives the text when the caller already read it (an HTML lecture page, cut into its
@@ -335,7 +335,7 @@ def store(
     return len(pages), len(chunks)
 
 
-def embed_document(doc_id: str, *, user_id: str = db.LOCAL_USER_ID) -> None:
+def embed_document(doc_id: str, *, user_id: str) -> None:
     """Embed the document's chunks that have no vector yet. Runs in the background after an
     upload; never raises."""
     try:
