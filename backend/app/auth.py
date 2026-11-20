@@ -14,10 +14,11 @@ import logging
 import re
 import secrets
 import time
+from typing import Annotated
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from . import auth_db
@@ -515,6 +516,23 @@ def auth_me(request: Request) -> AuthUser:
     if user is None:
         raise HTTPException(status_code=401, detail="not authenticated")
     return AuthUser(id=user.id, email=user.email, name=user.name)
+
+
+@router.delete("/account", status_code=204)
+def delete_account(user: Annotated[auth_db.UserRecord, Depends(require_user)]) -> Response:
+    """Delete the signed-in student's account and everything stored for it. The Origin
+    middleware has already refused a foreign Origin (DELETE is not a safe method)."""
+    try:
+        deleted = auth_db.delete_user(user.id)
+    except auth_db.AccountNotDeletable:
+        raise HTTPException(status_code=403, detail="this account cannot be deleted") from None
+    if not deleted:  # removed between the session lookup and now
+        raise HTTPException(status_code=401, detail="not authenticated")
+    # Fixed line only: no email, name or id.
+    log.info("account deleted")
+    res = Response(status_code=204)
+    res.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return res
 
 
 @router.post("/logout", status_code=204)

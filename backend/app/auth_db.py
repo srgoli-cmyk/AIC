@@ -336,6 +336,22 @@ def revoke_all_sessions(email: str) -> int:
     return int(removed.rowcount or 0)
 
 
+class AccountNotDeletable(Exception):
+    """The placeholder owner of pre-login data (`usr_local`) cannot be deleted this way."""
+
+
+def delete_user(user_id: str) -> bool:
+    """Delete the user row. Every table that holds the user's data references `users(id)` with
+    ON DELETE CASCADE (directly or through courses/lectures/documents), so courses, lectures,
+    chunks, files, documents, doc_chunks, course_sites, sessions and exchange codes go with it.
+    Returns False when no such user exists. Raises AccountNotDeletable for `usr_local`."""
+    if user_id == db.LOCAL_USER_ID:
+        raise AccountNotDeletable
+    with Session(db.engine) as session, session.begin():
+        result = session.execute(delete(User).where(User.id == user_id))
+    return bool(result.rowcount)
+
+
 class ClaimRefused(Exception):
     """The claim was refused and nothing was changed. The message is safe to print: it holds only
     fixed text, the email the operator typed, and course ids."""

@@ -22,6 +22,10 @@ from .config import settings
 
 log = logging.getLogger("aic")
 
+# pypdf warns about every broken font and odd stream in a course PDF, page after page. The text
+# still comes out, so only its errors are worth a log line.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
+
 MAX_BYTES = 40 * 1024 * 1024
 MAX_PAGES = 400
 # A slide is a few hundred characters; a page of typed notes is about 3,000.

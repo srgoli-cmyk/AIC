@@ -9,6 +9,9 @@ Base URL in development: `http://localhost:8000`
 ## GET /openapi.json
 FastAPI's schema. `info.title` is `AI Lecture Search`; the extension checks this before sending course data, because another app can hold the port and answer `/health`.
 
+## GET / and GET /privacy
+Public HTML pages, no login: the landing page and the privacy policy (with its "delete my account" action). Served from `web/site/index.html` and `web/site/privacy.html`, `404` if a file is missing. Their assets are under `/site/...`. Not part of the JSON API and not in `/openapi.json`.
+
 ## GET /health
 Response `200`: `{"status": "ok"}`
 
@@ -59,6 +62,12 @@ Response `200`:
 {"token": "<bearer-token>", "user": {"id": "usr_...", "email": "student@ucsd.edu", "name": "Ada Lovelace"}}
 ```
 `401 {"detail": "invalid or expired code"}` for every failure: the code is unknown, already used or expired, or the nonce is wrong or malformed. The response never says which.
+
+### DELETE /auth/account
+Deletes the signed-in student's account and all data stored for it (courses, lectures, captions, chunks, files, documents, course sites, sessions, extension tokens). Irreversible.
+Auth: session cookie or `Authorization: Bearer`. A foreign `Origin` without a valid Bearer token is `403` (see Origins and CORS).
+Response `204`, no body; the `aic_session` cookie is cleared.
+`401 {"detail": "not authenticated"}` when not signed in or the account is already gone. `403` for the placeholder `usr_local` account.
 
 ### GET /auth/me
 Requires a valid `aic_session` cookie or `Authorization: Bearer <token>`.
