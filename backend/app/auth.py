@@ -11,6 +11,7 @@ import hmac
 import html
 import json
 import logging
+import re
 import secrets
 import time
 from urllib.parse import urlencode
@@ -26,6 +27,9 @@ from .schemas import AuthUser, ExtensionExchangeRequest, ExtensionExchangeRespon
 log = logging.getLogger("aic")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# base64url (no padding) of a SHA-256 digest is always 43 characters.
+NONCE_CHALLENGE_RE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -227,8 +231,23 @@ def require_user(request: Request) -> auth_db.UserRecord:
 
 
 @router.get("/google/login")
-def google_login(client: str = Query(default="web", pattern=r"^(web|extension)$")):
-    """Redirect to Google's OAuth 2.0 authorization endpoint with PKCE and hd=ucsd.edu."""
+def google_login(
+    client: str = Query(default="web", pattern=r"^(web|extension)$"),
+    nonce: str | None = Query(default=None),
+):
+    """Redirect to Google's OAuth 2.0 authorization endpoint with PKCE and hd=ucsd.edu.
+
+    `client=extension` must carry `nonce`, the challenge (base64url SHA-256) of a secret the
+    extension keeps. The exchange code is bound to it, so a code from someone else's login
+    cannot be used by this extension."""
+    # A bad value is a 422 (the caller's bug, like a bad `client`), with a fixed message so the
+    # value is never echoed.
+    if client == "extension":
+        if nonce is None or not NONCE_CHALLENGE_RE.fullmatch(nonce):
+            raise HTTPException(status_code=422, detail="nonce challenge required")
+    elif nonce is not None:
+        raise HTTPException(status_code=422, detail="nonce is only for client=extension")
+
     if not settings.google_client_id or not settings.google_client_secret:
         raise HTTPException(status_code=503, detail="auth service not configured")
     if not session_secret_ok():
@@ -241,9 +260,15 @@ def google_login(client: str = Query(default="web", pattern=r"^(web|extension)$"
     code_verifier = generate_code_verifier()
     code_challenge = generate_code_challenge(code_verifier)
 
-    state_cookie_val = sign_oauth_state(
-        {"state": state_nonce, "verifier": code_verifier, "client": client, "ts": time.time()}
-    )
+    state_payload = {
+        "state": state_nonce,
+        "verifier": code_verifier,
+        "client": client,
+        "ts": time.time(),
+    }
+    if client == "extension":
+        state_payload["challenge"] = nonce
+    state_cookie_val = sign_oauth_state(state_payload)
 
     params = {
         "client_id": settings.google_client_id,
@@ -300,6 +325,16 @@ async def google_callback(
         log.warning("oauth callback rejected: %s", "google_error" if error else "bad_state")
         return _error_redirect(client_type, "login_failed")
 
+    challenge = ""
+    if client_type == "extension":
+        state_challenge = stored_state.get("challenge")
+        if not isinstance(state_challenge, str) or not NONCE_CHALLENGE_RE.fullmatch(
+            state_challenge
+        ):
+            # The state is signed, so this only happens for a state made without a challenge.
+            return _error_redirect(client_type, "login_failed")
+        challenge = state_challenge
+
     code_verifier = stored_state.get("verifier", "")
     if not code:
         return _error_redirect(client_type, "login_failed")
@@ -350,7 +385,7 @@ async def google_callback(
 
     # Success: extension gets a short-lived one-time code; web gets a session cookie.
     if client_type == "extension":
-        one_time_code = auth_db.create_extension_code(user.id, ttl_seconds=60)
+        one_time_code = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
         res = RedirectResponse(url=f"/auth/extension/done?code={one_time_code}", status_code=302)
     else:
         raw_session_token, _ = auth_db.create_session(
@@ -449,7 +484,7 @@ def extension_done(code: str | None = None, error: str | None = None):
 @router.post("/extension/exchange", response_model=ExtensionExchangeResponse)
 def extension_exchange(body: ExtensionExchangeRequest) -> ExtensionExchangeResponse:
     """Exchange a short-lived single-use code for a persistent extension bearer token."""
-    user = auth_db.consume_extension_code(body.code)
+    user = auth_db.consume_extension_code(body.code, body.nonce)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid or expired code")
 

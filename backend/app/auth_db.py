@@ -5,7 +5,9 @@ tokens and single-use extension exchange codes are stored in Postgres; raw token
 on creation and never logged or persisted.
 """
 
+import base64
 import hashlib
+import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -47,6 +49,7 @@ class AuthExchangeCode(db.Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    nonce_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 @dataclass(frozen=True)
@@ -176,11 +179,21 @@ def revoke_session(raw_token: str) -> bool:
     return bool(removed)
 
 
-def create_extension_code(user_id: str, ttl_seconds: int = 60) -> str:
-    """Create a short-lived single-use code for the Chrome extension login handoff. Only the
-    SHA-256 hash is stored; the raw code is returned once for the redirect URL."""
+def nonce_challenge(nonce: str) -> str:
+    """The challenge for a raw nonce: base64url (no padding) of its SHA-256. The extension sends
+    this at login and the raw nonce at exchange."""
+    digest = hashlib.sha256(nonce.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def create_extension_code(user_id: str, challenge: str, ttl_seconds: int = 60) -> str:
+    """Create a short-lived single-use code for the Chrome extension login handoff, bound to the
+    extension's nonce challenge. Only the SHA-256 hash of the code is stored; the raw code is
+    returned once for the redirect URL."""
     if ttl_seconds <= 0:
         raise ValueError("ttl_seconds must be positive")
+    if not challenge:
+        raise ValueError("challenge is required")
     db.ensure_schema()
     now = datetime.now(UTC)
     raw_code = secrets.token_urlsafe(32)
@@ -191,28 +204,40 @@ def create_extension_code(user_id: str, ttl_seconds: int = 60) -> str:
                 user_id=user_id,
                 expires_at=now + timedelta(seconds=ttl_seconds),
                 created_at=now,
+                nonce_hash=challenge,
             )
         )
     return raw_code
 
 
-def consume_extension_code(raw_code: str) -> UserRecord | None:
+def consume_extension_code(raw_code: str, nonce: str) -> UserRecord | None:
     """Atomically consume a single-use extension exchange code and return its student, or None if
-    unknown, expired, or already used. DELETE ... RETURNING prevents replay under concurrency."""
+    the code is unknown, expired or used, or the nonce does not match the code's challenge.
+    DELETE ... RETURNING prevents replay under concurrency. The row is deleted on any attempt
+    that finds it, so a wrong nonce cannot be retried: the nonce lives as long as the code."""
     if not raw_code or "\x00" in raw_code:
         return None
     db.ensure_schema()
     now = datetime.now(UTC)
     with Session(db.engine) as session, session.begin():
-        user_id = session.execute(
+        row = session.execute(
             delete(AuthExchangeCode)
             .where(
                 AuthExchangeCode.code_hash == hash_token(raw_code),
                 AuthExchangeCode.expires_at > now,
             )
-            .returning(AuthExchangeCode.user_id)
-        ).scalar_one_or_none()
-        if user_id is None:
+            .returning(AuthExchangeCode.user_id, AuthExchangeCode.nonce_hash)
+        ).one_or_none()
+        if row is None:
+            return None
+        user_id, stored_challenge = row
+        # Old rows have no challenge and are never accepted.
+        if not stored_challenge:
+            return None
+        # Constant-time comparison on bytes (compare_digest rejects non-ASCII str).
+        if not hmac.compare_digest(
+            nonce_challenge(nonce).encode("ascii"), stored_challenge.encode("utf-8")
+        ):
             return None
         user = session.get(User, user_id)
         return _to_record(user) if user else None

@@ -37,7 +37,7 @@ def test_create_session_validates_kind_and_ttl():
 
 def test_create_extension_code_validates_ttl():
     with pytest.raises(ValueError, match="ttl_seconds"):
-        auth_db.create_extension_code("usr_1", ttl_seconds=0)
+        auth_db.create_extension_code("usr_1", "c" * 43, ttl_seconds=0)
 
 
 def test_empty_and_nul_inputs_short_circuit_without_db(monkeypatch):
@@ -49,7 +49,7 @@ def test_empty_and_nul_inputs_short_circuit_without_db(monkeypatch):
         assert auth_db.get_user(bad) is None
         assert auth_db.get_user_by_session_token(bad) is None
         assert auth_db.revoke_session(bad) is False
-        assert auth_db.consume_extension_code(bad) is None
+        assert auth_db.consume_extension_code(bad, "nonce") is None
 
 
 def test_course_tables_use_user_scoped_composite_primary_keys():
@@ -125,21 +125,27 @@ def test_session_stores_only_hash_and_respects_kind_expiry_and_revocation():
 @pytest.mark.integration
 def test_extension_exchange_code_is_single_use_and_expires():
     user = auth_db.upsert_user("google-sub-3", "ext@ucsd.edu", "Ext Student")
-    code = auth_db.create_extension_code(user.id, ttl_seconds=60)
+    challenge = auth_db.nonce_challenge("raw-nonce")
+    code = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
 
     # First exchange succeeds; replay with the same code fails.
-    assert auth_db.consume_extension_code(code) == user
-    assert auth_db.consume_extension_code(code) is None
+    assert auth_db.consume_extension_code(code, "raw-nonce") == user
+    assert auth_db.consume_extension_code(code, "raw-nonce") is None
 
     # Expired code cannot be consumed.
-    expired_code = auth_db.create_extension_code(user.id, ttl_seconds=60)
+    expired_code = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
     with Session(db.engine) as session, session.begin():
         session.execute(
             update(auth_db.AuthExchangeCode)
             .where(auth_db.AuthExchangeCode.code_hash == auth_db.hash_token(expired_code))
             .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
         )
-    assert auth_db.consume_extension_code(expired_code) is None
+    assert auth_db.consume_extension_code(expired_code, "raw-nonce") is None
+
+    # A wrong nonce fails and burns the code, so the right nonce afterwards fails too.
+    burnt = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
+    assert auth_db.consume_extension_code(burnt, "other-nonce") is None
+    assert auth_db.consume_extension_code(burnt, "raw-nonce") is None
 
 
 @pytest.mark.integration

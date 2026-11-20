@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { authLoginUrl, handleAuthRedirect, authLogout } from "../src/auth.js";
+import { createHash } from "node:crypto";
+import {
+  authLoginUrl,
+  handleAuthRedirect,
+  authLogout,
+  startLogin,
+  makeNonce,
+  challengeFor,
+  PENDING_KEY,
+} from "../src/auth.js";
 import { getLectures, postSync } from "../src/backend.js";
 import { syncSlides } from "../src/slides.js";
 import { res } from "./helpers.mjs";
@@ -9,12 +18,23 @@ const BASE = "http://localhost:8000";
 
 function makeChromeStorage() {
   const store = {};
+  const session = {};
   const removed = [];
   return {
     store,
+    session,
     removed,
     chrome: {
       storage: {
+        session: {
+          get: async (key) => ({ [key]: session[key] }),
+          set: async (items) => {
+            Object.assign(session, items);
+          },
+          remove: async (key) => {
+            delete session[key];
+          },
+        },
         local: {
           get: async (keys) => {
             if (Array.isArray(keys)) {
@@ -39,9 +59,132 @@ function makeChromeStorage() {
   };
 }
 
-test("authLoginUrl points to /auth/google/login?client=extension", () => {
-  assert.equal(authLoginUrl("http://localhost:8000"), "http://localhost:8000/auth/google/login?client=extension");
-  assert.ok(authLoginUrl().endsWith("/auth/google/login?client=extension"));
+const NONCE = "test_nonce_not_a_secret";
+const T0 = 1_000_000;
+const DONE = `${BASE}/auth/extension/done?code=single_use_auth_code_xyz`;
+
+function withPending(h, over = {}) {
+  h.session[PENDING_KEY] = { nonce: NONCE, tabId: 42, startedAt: T0, ...over };
+  h.chrome.tabs = { remove: async () => {} };
+}
+function counter() {
+  const requests = [];
+  const fetchFn = async (url, init) => {
+    requests.push({ url, init });
+    return res({ token: "ext_tok", user: { id: "u" } });
+  };
+  return { requests, fetchFn };
+}
+const call = (h, fetchFn, over = {}) =>
+  handleAuthRedirect({ url: DONE, tabId: 42, chrome: h.chrome, fetchFn, backendUrl: BASE, now: () => T0 + 1000, ...over });
+
+test("authLoginUrl carries only the challenge", () => {
+  assert.equal(
+    authLoginUrl("abc-_", "http://localhost:8000"),
+    "http://localhost:8000/auth/google/login?client=extension&nonce=abc-_"
+  );
+});
+
+test("the challenge is base64url(sha256(nonce)) without padding", async () => {
+  const nonce = makeNonce();
+  const want = createHash("sha256").update(nonce).digest("base64url");
+  assert.equal(await challengeFor(nonce), want);
+  assert.ok(!want.includes("="));
+});
+
+test("the nonce is at least 32 bytes of randomness, and differs each time", () => {
+  const a = makeNonce();
+  assert.match(a, /^[A-Za-z0-9_-]+$/);
+  assert.ok(Buffer.from(a, "base64url").length >= 32);
+  assert.notEqual(a, makeNonce());
+});
+
+test("startLogin opens the tab with the challenge and keeps the nonce only in session storage", async () => {
+  const h = makeChromeStorage();
+  const created = [];
+  h.chrome.tabs = { create: async (o) => (created.push(o), { id: 7 }) };
+  assert.equal(await startLogin({ chrome: h.chrome, backendUrl: BASE, now: () => T0 }), true);
+  const p = h.session[PENDING_KEY];
+  assert.equal(p.tabId, 7);
+  assert.equal(p.startedAt, T0);
+  assert.ok(Buffer.from(p.nonce, "base64url").length >= 32);
+  const u = new URL(created[0].url);
+  assert.equal(u.searchParams.get("nonce"), await challengeFor(p.nonce));
+  assert.ok(!created[0].url.includes(p.nonce));
+  assert.deepEqual(h.store, {}); // nothing in chrome.storage.local
+
+  // A second login replaces the first.
+  h.chrome.tabs.create = async () => ({ id: 8 });
+  await startLogin({ chrome: h.chrome, backendUrl: BASE, now: () => T0 + 5 });
+  assert.equal(h.session[PENDING_KEY].tabId, 8);
+  assert.notEqual(h.session[PENDING_KEY].nonce, p.nonce);
+});
+
+test("a done-page in a tab the extension didn't open is ignored completely", async () => {
+  const h = makeChromeStorage();
+  withPending(h);
+  const closed = [];
+  h.chrome.tabs.remove = async (id) => closed.push(id);
+  const { requests, fetchFn } = counter();
+  assert.equal(await call(h, fetchFn, { tabId: 43 }), false);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(closed, []);
+  assert.deepEqual(h.store, {});
+  assert.ok(h.session[PENDING_KEY]); // still pending for the real tab
+});
+
+test("a code with no pending login is ignored", async () => {
+  const h = makeChromeStorage();
+  h.chrome.tabs = { remove: async () => {} };
+  const { requests, fetchFn } = counter();
+  assert.equal(await call(h, fetchFn), false);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(h.store, {});
+});
+
+test("an old pending login (over 10 minutes) is ignored", async () => {
+  const h = makeChromeStorage();
+  withPending(h);
+  const { requests, fetchFn } = counter();
+  assert.equal(await call(h, fetchFn, { now: () => T0 + 10 * 60 * 1000 + 1 }), false);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(h.store, {});
+});
+
+test("the pending login is cleared after one attempt, success or failure", async () => {
+  for (const ok of [true, false]) {
+    const h = makeChromeStorage();
+    withPending(h);
+    const requests = [];
+    const fetchFn = async (url, init) => {
+      requests.push({ url, init });
+      // Cleared before the result is awaited.
+      assert.equal(h.session[PENDING_KEY], undefined);
+      return ok ? res({ token: "t", user: {} }) : res({ detail: "no" }, { status: 400 });
+    };
+    assert.equal(await call(h, fetchFn), true);
+    assert.equal(await call(h, fetchFn), false);
+    assert.equal(requests.length, 1);
+  }
+});
+
+test("two events for the same page exchange once", async () => {
+  const h = makeChromeStorage();
+  withPending(h);
+  const { requests, fetchFn } = counter();
+  await Promise.all([call(h, fetchFn), call(h, fetchFn)]);
+  assert.equal(requests.length, 1);
+});
+
+test("nothing sensitive is written to chrome.storage.local except the token", async () => {
+  const h = makeChromeStorage();
+  withPending(h);
+  const { fetchFn } = counter();
+  await call(h, fetchFn);
+  const dump = JSON.stringify(h.store);
+  assert.deepEqual(Object.keys(h.store).sort(), ["authError", "authToken", "authUser"]);
+  assert.ok(!dump.includes(NONCE));
+  assert.ok(!dump.includes("single_use_auth_code_xyz"));
 });
 
 test("handleAuthRedirect ignores non-matching URLs", async () => {
@@ -59,7 +202,9 @@ test("handleAuthRedirect ignores non-matching URLs", async () => {
 });
 
 test("handleAuthRedirect exchanges code for token, stores credentials, and closes tab", async () => {
-  const { chrome, store } = makeChromeStorage();
+  const h = makeChromeStorage();
+  const { chrome, store } = h;
+  withPending(h);
   const closedTabs = [];
   chrome.tabs = { remove: async (id) => closedTabs.push(id) };
 
@@ -78,13 +223,14 @@ test("handleAuthRedirect exchanges code for token, stores credentials, and close
     chrome,
     fetchFn,
     backendUrl: BASE,
+    now: () => T0 + 1000,
   });
 
   assert.equal(handled, true);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, `${BASE}/auth/extension/exchange`);
   assert.equal(requests[0].init.method, "POST");
-  assert.deepEqual(JSON.parse(requests[0].init.body), { code: "single_use_auth_code_xyz" });
+  assert.deepEqual(JSON.parse(requests[0].init.body), { code: "single_use_auth_code_xyz", nonce: NONCE });
   assert.equal(store.authToken, "ext_test_token_123");
   assert.deepEqual(store.authUser, { id: "usr_1", email: "triton@ucsd.edu", name: "Triton" });
   assert.equal(store.authError, null);
@@ -92,7 +238,9 @@ test("handleAuthRedirect exchanges code for token, stores credentials, and close
 });
 
 test("handleAuthRedirect records error parameter and closes tab", async () => {
-  const { chrome, store } = makeChromeStorage();
+  const h = makeChromeStorage();
+  const { chrome, store } = h;
+  withPending(h, { tabId: 99 });
   const closedTabs = [];
   chrome.tabs = { remove: async (id) => closedTabs.push(id) };
 
@@ -102,6 +250,7 @@ test("handleAuthRedirect records error parameter and closes tab", async () => {
     chrome,
     fetchFn: async () => res({}),
     backendUrl: BASE,
+    now: () => T0 + 1000,
   });
 
   assert.equal(handled, true);
@@ -111,8 +260,9 @@ test("handleAuthRedirect records error parameter and closes tab", async () => {
 });
 
 test("handleAuthRedirect records exchange_failed on non-200 exchange response", async () => {
-  const { chrome, store } = makeChromeStorage();
-  chrome.tabs = { remove: async () => {} };
+  const h = makeChromeStorage();
+  const { chrome, store } = h;
+  withPending(h, { tabId: 10 });
 
   const fetchFn = async () => res({ detail: "Code expired" }, { status: 400 });
 
@@ -122,6 +272,7 @@ test("handleAuthRedirect records exchange_failed on non-200 exchange response", 
     chrome,
     fetchFn,
     backendUrl: BASE,
+    now: () => T0 + 1000,
   });
 
   assert.equal(handled, true);

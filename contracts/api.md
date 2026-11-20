@@ -21,8 +21,11 @@ Clients authenticate in one of two ways:
 Student data (courses, lectures, documents, chunks) is private per student.
 
 ### GET /auth/google/login
-Query parameter: `client` is `"web"` (default) or `"extension"`.
-Redirects (`302`) to Google's OAuth 2.0 authorization URL using PKCE, an anti-CSRF `state` cookie/record, and `hd=ucsd.edu`.
+Query parameters:
+- `client` is `"web"` (default) or `"extension"`.
+- `nonce` is required when `client=extension` and refused with `client=web`. It is the challenge for a secret the extension keeps: the base64url encoding, without padding, of the SHA-256 of a random nonce, matching `^[A-Za-z0-9_-]{43}$`. The raw nonce never appears in a URL. A missing or malformed `nonce` with `client=extension`, or any `nonce` with `client=web`, is refused with `422` before any redirect.
+
+Redirects (`302`) to Google's OAuth 2.0 authorization URL using PKCE, an anti-CSRF `state` cookie, and `hd=ucsd.edu`. For `client=extension` the challenge is kept in the signed state cookie and is not sent to Google.
 `503 {"detail": "auth service not configured"}` when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` or `SESSION_SECRET` is unset, or `SESSION_SECRET` is shorter than 32 characters.
 
 ### GET /auth/google/callback
@@ -30,7 +33,7 @@ Handles Google's OAuth redirect (`code`, `state`). Exchanges `code` with Google'
 - On invalid `state` or Google error: redirects `302` to `/app/?auth_error=login_failed` (or `/auth/extension/done?error=login_failed` for `client=extension`).
 - On non-`@ucsd.edu` or unverified account: redirects `302` to `/app/?auth_error=ucsd_only` (or `/auth/extension/done?error=ucsd_only` for `client=extension`).
 - On success (`client=web`): upserts the student, creates a web session, sets `aic_session`, and redirects `302` to `/app/`.
-- On success (`client=extension`): upserts the student, creates a single-use exchange code (valid for 60 seconds), and redirects `302` to `/auth/extension/done?code=<one-time-code>`.
+- On success (`client=extension`): upserts the student, creates a single-use exchange code (valid for 60 seconds) bound to the challenge from the login request, and redirects `302` to `/auth/extension/done?code=<one-time-code>`. A signed state without a valid challenge redirects to `/auth/extension/done?error=login_failed`.
 
 ### GET /auth/extension/done
 Minimal landing page for the extension login tab (`?code=...` or `?error=...`). The Chrome extension watches this URL via `chrome.tabs.onUpdated`, exchanges `code` via `POST /auth/extension/exchange`, and closes the tab.
@@ -38,14 +41,17 @@ Minimal landing page for the extension login tab (`?code=...` or `?error=...`). 
 ### POST /auth/extension/exchange
 Body:
 ```json
-{"code": "<one-time-code>"}
+{"code": "<one-time-code>", "nonce": "<raw-nonce>"}
 ```
-Unknown fields are rejected with `422`. Consumes the single-use code immediately and mints a revocable extension bearer token.
+`nonce` is the raw secret whose challenge (base64url, no padding, of its SHA-256) the extension sent as `nonce` to `GET /auth/google/login`. Unknown fields and a missing `code` or `nonce` are rejected with `422`. The exchange succeeds only if the code is valid, unexpired and unused, and `base64url(sha256(nonce))` equals the challenge stored with the code (compared in constant time). The code is consumed on every attempt, right or wrong, so a wrong nonce cannot be retried and the nonce expires with the code. A code made without a challenge is never accepted. On success it mints a revocable extension bearer token.
+
+The extension acts only on the `/auth/extension/done` tab it opened for its own pending login, and forgets the nonce after one exchange attempt.
+
 Response `200`:
 ```json
 {"token": "<bearer-token>", "user": {"id": "usr_...", "email": "student@ucsd.edu", "name": "Ada Lovelace"}}
 ```
-`401 {"detail": "invalid or expired code"}` when the code is unknown, already used, or expired.
+`401 {"detail": "invalid or expired code"}` for every failure: the code is unknown, already used or expired, or the nonce is wrong or malformed. The response never says which.
 
 ### GET /auth/me
 Requires a valid `aic_session` cookie or `Authorization: Bearer <token>`.

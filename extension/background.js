@@ -1,5 +1,5 @@
 // Service worker: thin wiring between the popup, the daily auto-sync and the sync controller.
-import { handleAuthRedirect } from "./src/auth.js";
+import { handleAuthRedirect, startLogin } from "./src/auth.js";
 import { ALARM, ALARM_MINUTES, IDLE_SECONDS, badge, pickDue } from "./src/auto.js";
 import { BACKEND_URL } from "./src/config.js";
 import { createController } from "./src/controller.js";
@@ -68,6 +68,12 @@ chrome.tabs?.onUpdated?.addListener((tabId, changeInfo, tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender?.id !== chrome.runtime.id) return false;
+  if (msg?.type === "AUTH_LOGIN") {
+    startLogin({ chrome, backendUrl: BACKEND_URL })
+      .then((ok) => sendResponse({ ok }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   const pending = controller.handle(msg);
   if (!pending) return false;
   pending.then(sendResponse).catch(() => sendResponse({ ok: false, error: "Request failed." }));

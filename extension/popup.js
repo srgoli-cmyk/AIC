@@ -1,6 +1,6 @@
 import { BACKEND_URL, WEB_PATH } from "./src/config.js";
 import { AUTO_KEY } from "./src/auto.js";
-import { authLoginUrl, authLogout } from "./src/auth.js";
+import { authLogout } from "./src/auth.js";
 import { autoLine, courseLink, displayCode, formatState } from "./src/summary.js";
 
 const out = document.getElementById("out");
@@ -76,7 +76,7 @@ function render() {
 }
 
 authLoginBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: authLoginUrl(BACKEND_URL) });
+  chrome.runtime.sendMessage({ type: "AUTH_LOGIN" }).catch(() => {});
 });
 
 authLogoutBtn.addEventListener("click", async () => {
