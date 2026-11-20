@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     FOREIGN KEY (user_id, entry_id) REFERENCES lectures(user_id, entry_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS chunks_entry_idx ON chunks(user_id, entry_id);
+-- (The (user_id, ...) b-tree indexes are created at the end, after the migration below, because on
+-- an older database the user_id column does not exist yet when the tables are declared.)
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_ops);
 
 -- Course documents (slides and notes as PDF or PowerPoint) and their search chunks. `source` is
@@ -135,8 +136,6 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
     FOREIGN KEY (user_id, doc_id) REFERENCES documents(user_id, doc_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS documents_course_idx ON documents(user_id, course_id);
-CREATE INDEX IF NOT EXISTS doc_chunks_doc_idx ON doc_chunks(user_id, doc_id);
 CREATE INDEX IF NOT EXISTS doc_chunks_embedding_idx ON doc_chunks USING hnsw (embedding vector_cosine_ops);
 
 -- The course's own website, once a search matched it or the student picked it, and how its
@@ -157,3 +156,160 @@ CREATE TABLE IF NOT EXISTS course_sites (
     PRIMARY KEY (user_id, course_id),
     FOREIGN KEY (user_id, course_id) REFERENCES courses(user_id, course_id) ON DELETE CASCADE
 );
+
+-- ---------------------------------------------------------------------------------------------
+-- Migration of databases created from the older schema. `CREATE TABLE IF NOT EXISTS` above does
+-- nothing on an existing table, so everything below brings an old database up to the same shape
+-- as a fresh one. All of it is a no-op on a fresh or already migrated database, and it keeps
+-- every row and embedding.
+-- ---------------------------------------------------------------------------------------------
+
+-- Columns added after the tables first shipped (lecture numbering, chunk hash, course details).
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS lecture_no     INTEGER;
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS section        TEXT;
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS chunked_hash   TEXT;
+ALTER TABLE lectures ADD COLUMN IF NOT EXISTS recorded_start TIMESTAMPTZ;
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS term_start     DATE;
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS term_end       DATE;
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS instructors    TEXT[];
+ALTER TABLE courses  ADD COLUMN IF NOT EXISTS sections       TEXT[];
+
+-- Per-student ownership: every existing row becomes the local student's ('usr_local' is seeded
+-- above).
+ALTER TABLE courses      ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+ALTER TABLE lectures     ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+ALTER TABLE files        ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+ALTER TABLE chunks       ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+ALTER TABLE documents    ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+ALTER TABLE doc_chunks   ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+ALTER TABLE course_sites ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'usr_local';
+
+-- (The blocks below build statements with || and quote_ident, not format(): the driver treats a
+-- percent sign in this file as a parameter placeholder.)
+-- Step 1: drop the old keys. Constraints are found by what they cover, not by guessing their
+-- default names. Foreign keys go first, because they depend on the primary keys.
+DO $$
+DECLARE
+    r record;
+BEGIN
+    -- Old single-column foreign keys to courses(course_id), lectures(entry_id), documents(doc_id).
+    FOR r IN
+        SELECT conrelid::regclass AS tbl, conname
+        FROM pg_constraint
+        WHERE contype = 'f'
+          AND array_length(conkey, 1) = 1
+          AND conrelid = ANY (ARRAY[
+              'lectures'::regclass::oid, 'files'::regclass::oid, 'documents'::regclass::oid,
+              'course_sites'::regclass::oid, 'chunks'::regclass::oid, 'doc_chunks'::regclass::oid])
+          AND confrelid = ANY (ARRAY[
+              'courses'::regclass::oid, 'lectures'::regclass::oid, 'documents'::regclass::oid])
+    LOOP
+        EXECUTE 'ALTER TABLE ' || r.tbl::text || ' DROP CONSTRAINT ' || quote_ident(r.conname);
+    END LOOP;
+
+    -- Old primary keys and the old UNIQUE(canvas_course_id): any primary key or unique
+    -- constraint on these tables that does not include user_id.
+    FOR r IN
+        SELECT c.conrelid::regclass AS tbl, c.conname
+        FROM pg_constraint c
+        WHERE c.contype IN ('p', 'u')
+          AND c.conrelid = ANY (ARRAY[
+              'courses'::regclass::oid, 'lectures'::regclass::oid, 'files'::regclass::oid,
+              'documents'::regclass::oid, 'course_sites'::regclass::oid])
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_attribute a
+              WHERE a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey) AND a.attname = 'user_id')
+    LOOP
+        EXECUTE 'ALTER TABLE ' || r.tbl::text || ' DROP CONSTRAINT ' || quote_ident(r.conname);
+    END LOOP;
+END
+$$;
+
+-- Step 2: add the composite keys the CREATE TABLE statements declare, where missing. Primary
+-- keys first, since the foreign keys point at them.
+DO $$
+DECLARE
+    r record;
+BEGIN
+    FOR r IN
+        SELECT * FROM (VALUES
+            ('courses', 'user_id, course_id'),
+            ('lectures', 'user_id, entry_id'),
+            ('files', 'user_id, canvas_file_id'),
+            ('documents', 'user_id, doc_id'),
+            ('course_sites', 'user_id, course_id')
+        ) AS t(tbl, cols)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conrelid = r.tbl::regclass AND contype = 'p'
+        ) THEN
+            EXECUTE 'ALTER TABLE ' || quote_ident(r.tbl) || ' ADD PRIMARY KEY (' || r.cols || ')';
+        END IF;
+    END LOOP;
+
+    -- One course per (student, Canvas course): replaces UNIQUE(canvas_course_id).
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'courses'::regclass AND contype = 'u' AND array_length(conkey, 1) = 2
+    ) THEN
+        ALTER TABLE courses ADD UNIQUE (user_id, canvas_course_id);
+    END IF;
+
+    -- courses.user_id -> users(id).
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'courses'::regclass AND contype = 'f'
+          AND confrelid = 'users'::regclass
+    ) THEN
+        ALTER TABLE courses
+            ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    END IF;
+
+    -- Composite foreign keys (child table, child columns, parent table, parent columns).
+    FOR r IN
+        SELECT * FROM (VALUES
+            ('lectures', 'user_id, course_id', 'courses', 'user_id, course_id'),
+            ('files', 'user_id, course_id', 'courses', 'user_id, course_id'),
+            ('documents', 'user_id, course_id', 'courses', 'user_id, course_id'),
+            ('course_sites', 'user_id, course_id', 'courses', 'user_id, course_id'),
+            ('chunks', 'user_id, entry_id', 'lectures', 'user_id, entry_id'),
+            ('doc_chunks', 'user_id, doc_id', 'documents', 'user_id, doc_id')
+        ) AS t(child, child_cols, parent, parent_cols)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = r.child::regclass AND contype = 'f'
+              AND confrelid = r.parent::regclass AND array_length(conkey, 1) = 2
+        ) THEN
+            EXECUTE 'ALTER TABLE ' || quote_ident(r.child)
+                || ' ADD FOREIGN KEY (' || r.child_cols || ') REFERENCES '
+                || quote_ident(r.parent) || ' (' || r.parent_cols || ') ON DELETE CASCADE';
+        END IF;
+    END LOOP;
+END
+$$;
+
+-- Step 3: the b-tree indexes on (user_id, ...). An old index of the same name that does not
+-- cover user_id is dropped first, because CREATE INDEX IF NOT EXISTS would keep it.
+DO $$
+DECLARE
+    r record;
+BEGIN
+    FOR r IN
+        SELECT i.indexrelid::regclass AS idx
+        FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid
+        WHERE c.relname IN ('chunks_entry_idx', 'documents_course_idx', 'doc_chunks_doc_idx')
+          AND c.relnamespace = current_schema()::regnamespace
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_attribute a
+              WHERE a.attrelid = i.indexrelid AND a.attname = 'user_id')
+    LOOP
+        EXECUTE 'DROP INDEX ' || r.idx::text;
+    END LOOP;
+END
+$$;
+
+CREATE INDEX IF NOT EXISTS chunks_entry_idx ON chunks(user_id, entry_id);
+CREATE INDEX IF NOT EXISTS documents_course_idx ON documents(user_id, course_id);
+CREATE INDEX IF NOT EXISTS doc_chunks_doc_idx ON doc_chunks(user_id, doc_id);
