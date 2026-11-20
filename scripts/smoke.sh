@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # End-to-end smoke test against a RUNNING backend (make dev). Owned by the maintainer.
-# Makes one real call to the answer service.
+# Makes one real call to the answer service. Every endpoint needs a signed-in student, so it makes a
+# short-lived session for a dedicated test account straight in the database (app.dev_session) and
+# deletes that account, with its sessions and the fixture course, when it is done.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BASE="${BASE_URL:-http://localhost:8000}"
 
 COURSE=canvas-999999
 SMOKE_DB="${SMOKE_DB:-aic}"
+SMOKE_EMAIL="smoke-test@ucsd.edu"
+VENV="${VENV:-.venv}"
 
 # Another app can hold the port and answer /health, so make sure this is our API before sending.
 echo "== is this our backend?"
@@ -16,16 +20,23 @@ api=$(curl -fsS "$BASE/openapi.json")
   exit 1
 }
 
-# The fixture course is synthetic: never leave it behind in the database.
+echo "== session for $SMOKE_EMAIL in $SMOKE_DB"
+TOKEN=$(cd backend && DATABASE_URL="postgresql://aic:aic@localhost:5432/$SMOKE_DB" \
+  "../$VENV/bin/python" -m app.dev_session --email "$SMOKE_EMAIL" --ttl-hours 1)
+[[ -n "$TOKEN" ]] || { echo "could not make a session" >&2; exit 1; }
+AUTH=(-H "Authorization: Bearer $TOKEN")
+
+# The test account and its fixture course are synthetic: never leave them behind.
 cleanup() {
-  docker compose exec -T db psql -U aic -d "$SMOKE_DB" -qc \
-    "DELETE FROM courses WHERE course_id = '$COURSE'" >/dev/null \
-    || echo "could not remove $COURSE from $SMOKE_DB" >&2
-  # Check through the API: this also catches a backend running on a different database.
-  if [[ "$(curl -fsS "$BASE/courses")" == *"\"course_id\":\"$COURSE\""* ]]; then
-    echo "$COURSE is still stored; set SMOKE_DB to the backend's database" >&2
+  # Check through the API first: this also catches a backend running on a different database.
+  if [[ "$(curl -fsS "${AUTH[@]}" "$BASE/courses" 2>/dev/null)" != *"\"course_id\":\"$COURSE\""* ]]; then
+    echo "the backend does not see the smoke course; set SMOKE_DB to the backend's database" >&2
     status=1
   fi
+  # Deleting the account removes its sessions and courses too (ON DELETE CASCADE).
+  docker compose exec -T db psql -U aic -d "$SMOKE_DB" -qc \
+    "DELETE FROM users WHERE email = '$SMOKE_EMAIL'" >/dev/null \
+    || { echo "could not remove $SMOKE_EMAIL from $SMOKE_DB" >&2; status=1; }
 }
 trap 'status=$?; cleanup; exit $status' EXIT
 
@@ -33,16 +44,16 @@ echo "== health"
 curl -fsS "$BASE/health"; echo
 
 echo "== sync fixture"
-curl -fsS -X POST "$BASE/sync" -H 'Content-Type: application/json' \
+curl -fsS -X POST "$BASE/sync" "${AUTH[@]}" -H 'Content-Type: application/json' \
   --data @contracts/fixtures/sync_sample.json; echo
 
 echo "== courses"
-curl -fsS "$BASE/courses"; echo
+curl -fsS "${AUTH[@]}" "$BASE/courses"; echo
 
 echo "== wait for indexing (first run loads the embedding model)"
 indexed=""
 for _ in $(seq 1 120); do
-  if curl -fsS "$BASE/courses" | grep -q '"course_id":"'"$COURSE"'"[^}]*"indexed":true'; then
+  if curl -fsS "${AUTH[@]}" "$BASE/courses" | grep -q '"course_id":"'"$COURSE"'"[^}]*"indexed":true'; then
     indexed=yes
     break
   fi
@@ -55,7 +66,7 @@ fi
 echo "indexed"
 
 echo "== ask (one real call to the answer service)"
-answer=$(curl -fsS -X POST "$BASE/ask" -H 'Content-Type: application/json' \
+answer=$(curl -fsS -X POST "$BASE/ask" "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"course_id":"'"$COURSE"'","question":"How do we differentiate a product?"}')
 [[ "$answer" == *'"sources":[{'* ]] || {
   echo "/ask returned no sources" >&2

@@ -1,4 +1,4 @@
-.PHONY: setup db db-reset dev web start check smoke claim-local-data
+.PHONY: setup db db-reset dev web start check smoke claim-local-data dev-session
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -38,3 +38,10 @@ smoke:
 claim-local-data:
 	@test -n "$(EMAIL)" || { echo "Usage: make claim-local-data EMAIL=you@ucsd.edu [DRY_RUN=1]"; exit 2; }
 	cd backend && ../$(VENV)/bin/python -m app.claim_local_data --email "$(EMAIL)" $(if $(DRY_RUN),--dry-run,)
+
+# Local testing only: print a short-lived Bearer token for EMAIL (an @ucsd.edu address), creating the
+# account if needed. It writes straight to the database, so it needs the access that already means
+# full control; it is never reachable over HTTP. TTL_HOURS=1 by default, 24 at most.
+dev-session:
+	@test -n "$(EMAIL)" || { echo "Usage: make dev-session EMAIL=smoke-test@ucsd.edu [TTL_HOURS=1]" >&2; exit 2; }
+	@cd backend && ../$(VENV)/bin/python -m app.dev_session --email "$(EMAIL)" $(if $(TTL_HOURS),--ttl-hours $(TTL_HOURS),)

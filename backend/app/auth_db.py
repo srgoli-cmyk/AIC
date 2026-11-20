@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import db
+from .config import settings
 
 SessionKind = Literal["web", "extension"]
 VALID_SESSION_KINDS: tuple[str, ...] = ("web", "extension")
@@ -125,9 +126,14 @@ def create_session(user_id: str, kind: SessionKind, ttl_days: int) -> tuple[str,
         raise ValueError(f"unsupported session kind: {kind!r}")
     if ttl_days <= 0:
         raise ValueError("ttl_days must be positive")
+    return _insert_session(user_id, kind, timedelta(days=ttl_days))
+
+
+def _insert_session(user_id: str, kind: SessionKind, ttl: timedelta) -> tuple[str, datetime]:
+    """Insert a session that lives for `ttl` and return (raw_token, expires_at)."""
     db.ensure_schema()
     now = datetime.now(UTC)
-    expires_at = now + timedelta(days=ttl_days)
+    expires_at = now + ttl
     raw_token = secrets.token_urlsafe(32)
     with Session(db.engine) as session, session.begin():
         session.execute(
@@ -241,6 +247,72 @@ def consume_extension_code(raw_code: str, nonce: str) -> UserRecord | None:
             return None
         user = session.get(User, user_id)
         return _to_record(user) if user else None
+
+
+class LocalSessionRefused(Exception):
+    """A local session was refused. The message is fixed text, safe to print."""
+
+
+MAX_LOCAL_TTL_HOURS = 24
+
+
+def _local_email(email: str) -> str:
+    """The lowercased address if it is a plain address in the allowed domain, else a refusal.
+    Same suffix rule as login; whitespace and control characters are refused outright."""
+    wanted = email.strip().lower()
+    suffix = "@" + settings.allowed_email_domain
+    local = wanted[: -len(suffix)]
+    if (
+        not wanted.endswith(suffix)
+        or not local
+        or "@" in local
+        or not wanted.isprintable()
+        or any(ch.isspace() for ch in wanted)
+    ):
+        raise LocalSessionRefused(f"Only addresses ending in {suffix} are accepted.")
+    return wanted
+
+
+def create_local_session(email: str, ttl_hours: float = 1) -> tuple[str, datetime]:
+    """Find or create the user with this exact lowercased email and mint an `extension` session.
+
+    For the local command `python -m app.dev_session` only; no route calls this. A created user
+    gets the placeholder google_sub `local-cli:<random hex>`. Returns (raw_token, expires_at);
+    only the token's hash is stored. Raises LocalSessionRefused for a bad address or TTL."""
+    wanted = _local_email(email)
+    if not 0 < ttl_hours <= MAX_LOCAL_TTL_HOURS:
+        raise LocalSessionRefused(f"--ttl-hours must be above 0 and at most {MAX_LOCAL_TTL_HOURS}.")
+    db.ensure_schema()
+    now = datetime.now(UTC)
+    with Session(db.engine) as session, session.begin():
+        # ON CONFLICT DO NOTHING on the unique email keeps this safe if two runs race.
+        session.execute(
+            insert(User)
+            .values(
+                id=_new_id("usr"),
+                google_sub=f"local-cli:{secrets.token_hex(16)}",
+                email=wanted,
+                name=wanted.split("@", 1)[0],
+                created_at=now,
+                last_login_at=now,
+            )
+            .on_conflict_do_nothing(index_elements=[User.email])
+        )
+        user_id = session.execute(select(User.id).where(User.email == wanted)).scalar_one()
+    return _insert_session(user_id, "extension", timedelta(hours=ttl_hours))
+
+
+def revoke_all_sessions(email: str) -> int:
+    """Delete every session of the user with this email (any kind). Returns how many were removed;
+    an unknown user is 0. Same address rule as create_local_session."""
+    wanted = _local_email(email)
+    db.ensure_schema()
+    with Session(db.engine) as session, session.begin():
+        user_id = session.execute(select(User.id).where(User.email == wanted)).scalar_one_or_none()
+        if user_id is None:
+            return 0
+        removed = session.execute(delete(UserSession).where(UserSession.user_id == user_id))
+    return int(removed.rowcount or 0)
 
 
 class ClaimRefused(Exception):
