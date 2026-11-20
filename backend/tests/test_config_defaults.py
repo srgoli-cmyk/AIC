@@ -14,7 +14,7 @@ CONFIG_PATH = Path(config.__file__)
 
 def _fresh_settings(monkeypatch, **env):
     monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)  # ignore the real .env
-    for name in ("OPENROUTER_MODEL", "OPENROUTER_REASONING"):
+    for name in ("OPENROUTER_MODEL", "OPENROUTER_REASONING", "ALLOWED_HOSTS"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -35,6 +35,12 @@ def test_explicitly_empty_reasoning_means_no_reasoning_key(monkeypatch):
     module = _fresh_settings(monkeypatch, OPENROUTER_REASONING="")
     assert module.settings.openrouter_reasoning == ""
     assert module.reasoning_payload(module.settings.openrouter_reasoning, "X") is None
+
+
+def test_allowed_hosts_default_is_strict_loopback_only(monkeypatch):
+    module = _fresh_settings(monkeypatch)
+    assert module.settings.allowed_hosts == "localhost,127.0.0.1"
+    assert module.allowed_host_list(module.settings.allowed_hosts) == ["localhost", "127.0.0.1"]
 
 
 @pytest.mark.parametrize("value", ["high", "low"])

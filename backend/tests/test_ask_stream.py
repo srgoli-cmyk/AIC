@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from netguard import NetworkBlocked
 
-from app import answer, ingest
+from app import answer, auth_db, db, ingest
 from app.main import app
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -431,7 +431,7 @@ def test_invalid_bodies_are_a_plain_422(body):
 
 @pytest.mark.integration
 def test_nothing_indexed_sends_only_final_and_no_model_call(upstream, monkeypatch):
-    monkeypatch.setattr(ingest, "ingest_course", lambda course_id: None)
+    monkeypatch.setattr(ingest, "ingest_course", lambda course_id, *, user_id: None)
     _sync()
     assert _events() == [("final", {"answer": answer.NOTHING_INDEXED, "sources": []})]
     assert upstream.requests == []
@@ -453,7 +453,7 @@ def test_the_endpoint_log_has_numbers_only(upstream, caplog):
 def test_closing_the_event_generator_early_closes_the_upstream_response(upstream):
     _sync()
     upstream.reply("one", "two", "three")
-    given = answer.prepare(CID, "q", 8)
+    given = answer.prepare(CID, "q", 8, user_id=db.LOCAL_USER_ID)
 
     async def run():
         events = answer.answer_events("q", given)
@@ -474,7 +474,7 @@ def test_cancelling_the_event_generator_closes_the_upstream_response(upstream):
 
     upstream.parts = [chunk("one")]
     upstream.then = hang
-    given = answer.prepare(CID, "q", 8)
+    given = answer.prepare(CID, "q", 8, user_id=db.LOCAL_USER_ID)
 
     async def run():
         async def consume():
@@ -503,7 +503,7 @@ def test_a_slow_consumer_does_not_stop_the_deadline_from_becoming_an_error_event
 
     upstream.parts = [chunk("[Lecture 8, 0:00] one")]
     upstream.then = hang
-    given = answer.prepare(CID, "q", 8)
+    given = answer.prepare(CID, "q", 8, user_id=db.LOCAL_USER_ID)
     real = answer.stream_llm
     monkeypatch.setattr(answer, "stream_llm", lambda messages, **kw: real(messages, timeout=0.3))
 
@@ -596,7 +596,8 @@ def test_the_response_body_generator_closes_the_model_call_when_closed(upstream)
         from app.main import ask_stream
         from app.schemas import AskRequest
 
-        response = await ask_stream(AskRequest(course_id=CID, question="q", top_k=8))
+        user = auth_db.UserRecord(id=db.LOCAL_USER_ID, email="student@ucsd.edu", name="Test")
+        response = await ask_stream(AskRequest(course_id=CID, question="q", top_k=8), user)
         body = response.body_iterator
         assert (await anext(body)).startswith("event: delta")
         await body.aclose()

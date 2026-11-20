@@ -1,6 +1,7 @@
 """Keeps tests off the network. The error is a BaseException, so that the code under test cannot
 catch it with `except Exception` and turn it into an ordinary error response."""
 
+import errno
 import ipaddress
 import socket
 
@@ -33,6 +34,15 @@ def _guard_connect(original):
         # Unix sockets have a path as the address; TCP has (host, port, ...).
         if isinstance(address, tuple) and not _is_local(address[0]):
             raise NetworkBlocked(f"a test tried to connect to {address[0]}")
+        # On Windows, connecting to port 1 hangs for 20+ seconds waiting for OS SYN retries.
+        # Fail immediately with ECONNREFUSED just as Linux/macOS does for unreachable port 1.
+        if (
+            isinstance(address, tuple)
+            and _is_local(address[0])
+            and len(address) > 1
+            and address[1] == 1
+        ):
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
         return original(self, address, *args, **kwargs)
 
     return connect

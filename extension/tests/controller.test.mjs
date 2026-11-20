@@ -16,7 +16,7 @@ function setup({ url = `https://canvas.ucsd.edu/courses/${COURSE}`, server = {},
       return real(o);
     };
   }
-  const store = {};
+  const store = { authToken: "tok_test" };
   const session = {};
   const sessionWrites = [];
   const writes = [];
@@ -84,7 +84,7 @@ test("not a course page: a clear message, nothing stored, nothing requested", as
   assert.match(res.error, /Open a Canvas course page/);
   assert.equal(s.requests.length, 0);
   assert.equal(writes.length, 0);
-  assert.deepEqual(store, {});
+  assert.deepEqual(store, { authToken: "tok_test" });
 });
 
 test("a failed sync stores a fixed message and keeps the last summary", async () => {
@@ -199,7 +199,7 @@ test("popup: reads storage on open, re-renders on change, sync click shows refus
   globalThis.chrome = {
     runtime: { sendMessage: async (m) => (sent.push(m), order.push(m.type), m.type === "SYNC" ? { ok: false, error: "A sync is already running." } : { ok: true }) },
     storage: {
-      local: { get: async () => (order.push("storage.get"), { lastSync: { courseId: 5, lectures: 1, pending: 0, finishedAt: "2026-11-03T12:00:00.000Z", notes: [], skipped: {} } }) },
+      local: { get: async () => (order.push("storage.get"), { authToken: "tok", authUser: { email: "triton@ucsd.edu" }, lastSync: { courseId: 5, lectures: 1, pending: 0, finishedAt: "2026-11-03T12:00:00.000Z", notes: [], skipped: {} } }) },
       onChanged: { addListener: (fn) => (listener = fn) },
     },
   };
@@ -238,4 +238,25 @@ test("Canvas course codes are shortened for display", async () => {
   assert.equal(displayCode("MATH 20A"), "MATH 20A");
   assert.equal(displayCode("ORG_HDSIOrientation_AY2627"), "ORG_HDSIOrientation_AY2627");
   assert.equal(displayCode(undefined), undefined);
+});
+
+test("controller refuses to sync when unauthenticated and does not touch Canvas", async () => {
+  const { controller, store, chrome } = setup();
+  delete store.authToken;
+
+  let queriedTabs = false;
+  const originalQuery = chrome.tabs.query;
+  chrome.tabs.query = async (...args) => {
+    queriedTabs = true;
+    return originalQuery(...args);
+  };
+
+  const startRes = await controller.handle({ type: "SYNC" });
+  assert.equal(startRes.ok, false);
+  assert.match(startRes.error, /Sign in with your @ucsd.edu Google account/);
+  assert.equal(queriedTabs, false, "tabs should not be queried when unauthenticated");
+
+  const startAllRes = await controller.handle({ type: "SYNC_ALL" });
+  assert.equal(startAllRes.ok, false);
+  assert.match(startAllRes.error, /Sign in with your @ucsd.edu Google account/);
 });

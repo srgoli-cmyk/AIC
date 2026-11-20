@@ -2,6 +2,7 @@
 // chrome.storage.local so the popup can close and reopen mid-sync. Only counts, the course id,
 // timestamps, fixed messages and stage names are stored.
 import { AUTO_KEY, afterFailure, afterSuccess } from "./auto.js";
+import { AUTH_ERR } from "./authErrors.js";
 import { confirmBackend } from "./backend.js";
 import { parseCourseId } from "./canvas.js";
 import { CANVAS_ORIGIN } from "./config.js";
@@ -76,6 +77,11 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
     };
     try {
       await save(state);
+      // Read current extension auth token; unauthenticated calls never touch Canvas or backend
+      const { authToken } = await chrome.storage.local.get("authToken");
+      if (!authToken) {
+        throw new SyncError("AUTH_REQUIRED");
+      }
       const sync = all ? runAllSync : runSync;
       const summary = await sync({
         tabUrl,
@@ -83,6 +89,7 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         tabs: chrome.tabs,
         scripting: chrome.scripting,
         backendUrl,
+        token: authToken || null,
         now,
         sleep,
         report: (patch) => void report(patch),
@@ -106,6 +113,15 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         await updateAuto(courseId, (prev) => afterSuccess(prev, summary, now()));
       }
     } catch (e) {
+      if (e instanceof SyncError && e.code === "AUTH_EXPIRED") {
+        // Signed out: the popup shows Sign in; other settings stay.
+        try {
+          await chrome.storage.local.remove(["authToken", "authUser"]);
+          await chrome.storage.local.set({ authError: AUTH_ERR.SESSION_EXPIRED });
+        } catch {
+          // The next call finds the token rejected again.
+        }
+      }
       await save({ status: "error", courseId, message: messageFor(e), ...(auto ? { mode: "auto" } : {}), ...(all ? { scope: "all" } : {}) });
       try {
         const code = e instanceof SyncError ? e.code : "UNKNOWN";
@@ -175,16 +191,26 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
     return { ok: true };
   }
 
-  function startAll() {
-    if (running) return Promise.resolve({ ok: false, error: MESSAGES.BUSY });
+  async function startAll() {
+    if (running) return { ok: false, error: MESSAGES.BUSY };
     running = true;
+    const { authToken } = await chrome.storage.local.get("authToken");
+    if (!authToken) {
+      running = false;
+      return { ok: false, error: MESSAGES.AUTH_REQUIRED };
+    }
     void run(null, null, { all: true }); // keeps going after the popup closes
-    return Promise.resolve({ ok: true, started: true });
+    return { ok: true, started: true };
   }
 
   async function start() {
     if (running) return { ok: false, error: MESSAGES.BUSY };
     running = true;
+    const { authToken } = await chrome.storage.local.get("authToken");
+    if (!authToken) {
+      running = false;
+      return { ok: false, error: MESSAGES.AUTH_REQUIRED };
+    }
     let tabUrl;
     try {
       const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });

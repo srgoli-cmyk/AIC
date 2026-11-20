@@ -248,5 +248,23 @@ class PracticeResponse(BaseModel):
     questions: list[PracticeQuestion]
 
 
+class AuthUser(BaseModel):
+    id: str
+    email: str
+    name: str
+
+
+class ExtensionExchangeRequest(_Strict):
+    code: str = Field(min_length=1, max_length=200)
+    # The raw nonce. Its format is not checked here: a malformed one must reach the exchange so it
+    # burns the code like any other wrong nonce.
+    nonce: str = Field(max_length=200)
+
+
+class ExtensionExchangeResponse(BaseModel):
+    token: str
+    user: AuthUser
+
+
 def course_id_for(canvas_course_id: int) -> str:
     return f"canvas-{canvas_course_id}"

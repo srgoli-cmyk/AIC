@@ -21,6 +21,7 @@ function world({ courses = COURSES, coursesStatus = 200, backendDown = false } =
       if (backendDown) throw new TypeError("Failed to fetch");
       return res({ info: { title: "AI Lecture Search" } });
     }
+    if (u.pathname === "/auth/me") return res({ id: "u" });
     if (u.pathname === "/api/v1/courses") {
       if (coursesStatus !== 200) return res("", { status: coursesStatus });
       return res(`while(1);${JSON.stringify(courses)}`);
@@ -34,6 +35,7 @@ function deps(w, runOne, reports = []) {
   return {
     fetch: w.fetch,
     backendUrl: "http://localhost:8000",
+    token: "test_session_token",
     now: () => Date.parse("2026-11-14T12:00:00Z"),
     sleep: async () => {},
     report: (p) => reports.push(p),
@@ -110,6 +112,15 @@ test("a Canvas login or backend problem stops the whole run", async () => {
   await assert.rejects(runAllSync(deps(world(), stop("CANVAS_LOGIN"))), /Log in to Canvas/);
   await assert.rejects(runAllSync(deps(world(), stop("BACKEND_DOWN"))), /Cannot reach the backend/);
   assert.equal(calls, 2, "stopped after the first course each time");
+});
+
+test("Sync all while signed out stops with AUTH_EXPIRED before any request", async () => {
+  const w = world();
+  const never = async () => assert.fail("no course should be synced");
+  for (const token of [undefined, null, ""]) {
+    await assert.rejects(runAllSync({ ...deps(w, never), token }), (e) => e.code === "AUTH_EXPIRED");
+  }
+  assert.deepEqual(w.requests, []);
 });
 
 test("Canvas logged out, no courses, or nothing synced at all are errors", async () => {

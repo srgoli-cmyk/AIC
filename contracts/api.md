@@ -12,6 +12,66 @@ FastAPI's schema. `info.title` is `AI Lecture Search`; the extension checks this
 ## GET /health
 Response `200`: `{"status": "ok"}`
 
+## Auth
+All endpoints except `/health`, `/openapi.json`, and `/auth/*` require a verified `@ucsd.edu` student.
+Clients authenticate in one of two ways:
+- **Web app**: `HttpOnly` session cookie `aic_session` (`SameSite=Lax`; `Secure` in HTTPS deployments).
+- **Chrome extension**: `Authorization: Bearer <token>` header.
+
+Student data (courses, lectures, documents, chunks) is private per student.
+
+### Origins and CORS
+- CORS allows exactly one cross-origin caller, the extension at `chrome-extension://<extension id>` (env `EXTENSION_ID`). Responses never carry `Access-Control-Allow-Credentials`. Allowed request headers are `Content-Type` and `Authorization`.
+- Every `POST`, `PUT` and `DELETE` is checked before the body is read. It is accepted if it has no `Origin` header, if `Origin` equals the backend's own origin (request scheme and `Host`), or if it has a valid `Authorization: Bearer <token>`. Otherwise the response is `403 {"detail": "origin not allowed"}` and nothing runs.
+- `POST /auth/extension/exchange` is not checked: it takes no cookie or token, and the one-time code and nonce protect it.
+- Browser pages use the `aic_session` cookie and must be served by the backend (`/app/`).
+
+### GET /auth/google/login
+Query parameters:
+- `client` is `"web"` (default) or `"extension"`.
+- `nonce` is required when `client=extension` and refused with `client=web`. It is the challenge for a secret the extension keeps: the base64url encoding, without padding, of the SHA-256 of a random nonce, matching `^[A-Za-z0-9_-]{43}$`. The raw nonce never appears in a URL. A missing or malformed `nonce` with `client=extension`, or any `nonce` with `client=web`, is refused with `422` before any redirect.
+
+Redirects (`302`) to Google's OAuth 2.0 authorization URL using PKCE, an anti-CSRF `state` cookie, and `hd=ucsd.edu`. For `client=extension` the challenge is kept in the signed state cookie and is not sent to Google.
+`503 {"detail": "auth service not configured"}` when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` or `SESSION_SECRET` is unset, or `SESSION_SECRET` is shorter than 32 characters.
+
+### GET /auth/google/callback
+Handles Google's OAuth redirect (`code`, `state`). Exchanges `code` with Google's token endpoint over TLS (OpenID Connect Core 3.1.3.7: the ID token comes straight from Google, so its claims are checked instead of its signature). The callback rejects the token with `auth_error=login_failed` unless `aud` is this app's client id (if `aud` is a list it must contain the client id and `azp` must equal it), `iss` is `https://accounts.google.com` or `accounts.google.com`, `exp` is in the future and `iat` is not in the future (both with 60 s of clock skew allowed), and `email` is plain ASCII with exactly one `@`. A valid token is rejected with `auth_error=ucsd_only` unless `email_verified == true`, `hd == "ucsd.edu"` and the email ends in `@ucsd.edu` (the domain is `ALLOWED_EMAIL_DOMAIN`). Rejected logins are logged with a fixed reason only, never the email or domain.
+- On invalid `state` or Google error: redirects `302` to `/app/?auth_error=login_failed` (or `/auth/extension/done?error=login_failed` for `client=extension`).
+- On non-`@ucsd.edu` or unverified account: redirects `302` to `/app/?auth_error=ucsd_only` (or `/auth/extension/done?error=ucsd_only` for `client=extension`).
+- `auth_error` (web) and `error` (extension) take only these two values, `login_failed` and `ucsd_only`. Clients map exactly these, and show a generic sign-in failure for anything else.
+- On success (`client=web`): upserts the student, creates a web session, sets `aic_session`, and redirects `302` to `/app/`.
+- On success (`client=extension`): upserts the student, creates a single-use exchange code (valid for 60 seconds) bound to the challenge from the login request, and redirects `302` to `/auth/extension/done?code=<one-time-code>`. A signed state without a valid challenge redirects to `/auth/extension/done?error=login_failed`.
+
+### GET /auth/extension/done
+Minimal landing page for the extension login tab (`?code=...` or `?error=...`). The Chrome extension watches this URL via `chrome.tabs.onUpdated`, exchanges `code` via `POST /auth/extension/exchange`, and closes the tab.
+
+### POST /auth/extension/exchange
+Body:
+```json
+{"code": "<one-time-code>", "nonce": "<raw-nonce>"}
+```
+`nonce` is the raw secret whose challenge (base64url, no padding, of its SHA-256) the extension sent as `nonce` to `GET /auth/google/login`. Unknown fields and a missing `code` or `nonce` are rejected with `422`. The exchange succeeds only if the code is valid, unexpired and unused, and `base64url(sha256(nonce))` equals the challenge stored with the code (compared in constant time). The code is consumed on every attempt, right or wrong, so a wrong nonce cannot be retried and the nonce expires with the code. A code made without a challenge is never accepted. On success it mints a revocable extension bearer token.
+
+The extension acts only on the `/auth/extension/done` tab it opened for its own pending login, and forgets the nonce after one exchange attempt.
+
+Response `200`:
+```json
+{"token": "<bearer-token>", "user": {"id": "usr_...", "email": "student@ucsd.edu", "name": "Ada Lovelace"}}
+```
+`401 {"detail": "invalid or expired code"}` for every failure: the code is unknown, already used or expired, or the nonce is wrong or malformed. The response never says which.
+
+### GET /auth/me
+Requires a valid `aic_session` cookie or `Authorization: Bearer <token>`.
+Response `200`:
+```json
+{"id": "usr_...", "email": "student@ucsd.edu", "name": "Ada Lovelace"}
+```
+`401 {"detail": "not authenticated"}` when missing, invalid, or expired.
+
+### POST /auth/logout
+Revokes the current session (from `aic_session` cookie or `Authorization: Bearer <token>`) and clears the `aic_session` cookie.
+Response `204`.
+
 ## POST /sync
 Body: `SyncPayload`, see `sync_payload.schema.json`. Example: `fixtures/sync_sample.json`.
 
@@ -182,6 +242,8 @@ A reply from the model that cannot be read is asked for once more before the req
 
 ## Errors
 All errors use FastAPI's default shape: `{"detail": ...}`.
+- `401 {"detail": "not authenticated"}`: missing, invalid, or expired session cookie or bearer token.
+- `503 {"detail": "auth service not configured"}`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` or `SESSION_SECRET` is not set, or `SESSION_SECRET` is shorter than 32 characters.
 - `503 {"detail": "database unavailable"}`: the database cannot be reached.
 - `503 {"detail": "answer service not configured"}`: no API key is set for `/ask`.
 - `503 {"detail": "search service unavailable"}`: the embedding model could not be loaded for `/ask`.

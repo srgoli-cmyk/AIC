@@ -18,8 +18,8 @@ class EmbeddingDimensionError(ValueError):
     """The embedder returned vectors that do not match the vector column."""
 
 
-def ingest_lecture(entry_id: str) -> None:
-    captions = db.lecture_captions(entry_id)
+def ingest_lecture(entry_id: str, *, user_id: str) -> None:
+    captions = db.lecture_captions(entry_id, user_id=user_id)
     if captions is None:
         return
     digest = db.captions_hash(captions)
@@ -33,21 +33,21 @@ def ingest_lecture(entry_id: str) -> None:
     vectors = embeddings.embed([c.text for c in chunks])
     if len(vectors) != len(chunks) or any(len(v) != settings.embedding_dim for v in vectors):
         raise EmbeddingDimensionError
-    db.replace_chunks(entry_id, digest, chunks, vectors)
+    db.replace_chunks(entry_id, digest, chunks, vectors, user_id=user_id)
 
 
-def ingest_course(course_id: str) -> None:
+def ingest_course(course_id: str, *, user_id: str) -> None:
     """Chunk every lecture of the course that is due, then recompute `indexed`."""
     try:
-        for entry_id in db.due_lecture_ids(course_id):
+        for entry_id in db.due_lecture_ids(course_id, user_id=user_id):
             try:
-                ingest_lecture(entry_id)
+                ingest_lecture(entry_id, user_id=user_id)
             except embeddings.ModelLoadError as exc:
                 # The next lecture would fail the same way. Stop; they stay due for the next sync.
                 log.error("ingestion stopped: embedding model not loaded (%s)", exc.cause)
                 break
             except Exception as exc:
                 log.error("ingestion of lecture %s failed: %s", entry_id, type(exc).__name__)
-        db.refresh_indexed(course_id)
+        db.refresh_indexed(course_id, user_id=user_id)
     except Exception as exc:
         log.error("ingestion of course %s failed: %s", course_id, type(exc).__name__)

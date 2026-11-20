@@ -519,7 +519,12 @@ def to_source(hit: db.ChunkHit) -> Source:
 
 
 def prepare(
-    course_id: str, question: str, top_k: int, entry_id: str | None = None
+    course_id: str,
+    question: str,
+    top_k: int,
+    entry_id: str | None = None,
+    *,
+    user_id: str,
 ) -> list[db.ChunkHit]:
     """Everything before the model call: key check, embed, search, slides, dedupe. Returns the
     passages to give the model (empty when nothing is indexed). Shared by /ask and /ask/stream.
@@ -534,13 +539,13 @@ def prepare(
     # Over-fetch: de-duplication removes rows, and the closest rows are often neighbours.
     limit = max(top_k * 4, 40)
     if entry_id is None:
-        hits = db.search_chunks(course_id, query_vector, limit)
+        hits = db.search_chunks(course_id, query_vector, limit, user_id=user_id)
         # The course's slides are searched with its lectures; the closest of both are used.
-        slides = db.search_doc_chunks(course_id, query_vector, limit)
+        slides = db.search_doc_chunks(course_id, query_vector, limit, user_id=user_id)
         if slides:
             hits = sorted([*hits, *slides], key=lambda h: h.distance)
     else:
-        hits = db.search_chunks(course_id, query_vector, limit, entry_id=entry_id)
+        hits = db.search_chunks(course_id, query_vector, limit, entry_id=entry_id, user_id=user_id)
     return dedupe(hits, top_k) if hits else []
 
 
@@ -555,10 +560,15 @@ def finish(reply: str, given: list[db.ChunkHit]) -> AskResponse:
 
 
 def answer_question(
-    course_id: str, question: str, top_k: int, entry_id: str | None = None
+    course_id: str,
+    question: str,
+    top_k: int,
+    entry_id: str | None = None,
+    *,
+    user_id: str,
 ) -> AskResponse:
     """Raises AnswerNotConfigured, SearchUnavailable or AnswerUnavailable; main maps them."""
-    given = prepare(course_id, question, top_k, entry_id)
+    given = prepare(course_id, question, top_k, entry_id, user_id=user_id)
     if not given:
         return AskResponse(answer=NOTHING_INDEXED, sources=[])
     return finish(call_llm(build_messages(question, given)), given)

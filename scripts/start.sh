@@ -42,7 +42,7 @@ echo "Starting the database..."
 docker compose up -d --wait db >/dev/null || fail "The database did not start."
 
 echo "Starting the backend on $BASE (the first start takes a little longer)..."
-(cd backend && exec "$ROOT/$VENV/bin/uvicorn" app.main:app --port "$PORT") &
+(cd backend && exec "$ROOT/$VENV/bin/uvicorn" app.main:app --port "$PORT" --no-access-log) &
 backend=$!
 
 for _ in $(seq 1 180); do

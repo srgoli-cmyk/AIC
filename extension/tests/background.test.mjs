@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { makeServer } from "./helpers.mjs";
 
 // background.js talks to the global chrome and fetch, so each import gets fakes first.
-async function load({ server = makeServer(), stored = {}, session = {} } = {}) {
+async function load({ server = makeServer(), stored = { authToken: "tok_test" }, session = {} } = {}) {
   let listener;
   const removed = [];
   globalThis.fetch = server.fetch;
@@ -52,6 +52,13 @@ test("PING and SYNC are routed to the controller", async () => {
   assert.match(sync.error, /Open a Canvas course page/);
 });
 
+test("SYNC refuses when unauthenticated", async () => {
+  const { listener } = await load({ stored: {} });
+  const sync = await ask(listener, { type: "SYNC" });
+  assert.equal(sync.ok, false);
+  assert.match(sync.error, /Sign in with your @ucsd.edu Google account/);
+});
+
 test("a handler that throws answers with a fixed message, not the error text", async () => {
   const { listener } = await load();
   globalThis.chrome.tabs.query = async () => {
@@ -71,7 +78,7 @@ test("startup recovery marks an interrupted sync and closes its tab", async () =
 });
 
 test("the daily alarm is created, and a tick syncs a due course only while the computer is in use", async () => {
-  const stored = { autoSync: { 12345: { on: true, lastSuccess: 0, failures: 0, starts: [] } } };
+  const stored = { authToken: "tok_test", autoSync: { 12345: { on: true, lastSuccess: 0, failures: 0, starts: [] } } };
   const created = [];
   let onAlarm;
   let onState;

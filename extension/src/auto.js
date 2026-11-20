@@ -64,7 +64,7 @@ export function afterFailure(prev, code, now) {
     ...prev,
     lastAttempt: now,
     failed: true,
-    loginNeeded: code === "CANVAS_LOGIN" || code === "NO_KAF_FRAME",
+    loginNeeded: code === "CANVAS_LOGIN" || code === "NO_KAF_FRAME" || code === "AUTH_EXPIRED" || code === "AUTH_REQUIRED",
   };
 }
 

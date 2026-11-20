@@ -104,7 +104,7 @@ def test_query_does_not_load_caption_text():
 
     event.listen(db.engine, "before_cursor_execute", record)
     try:
-        db.list_lecture_statuses(CID)
+        db.list_lecture_statuses(CID, user_id=db.LOCAL_USER_ID)
     finally:
         event.remove(db.engine, "before_cursor_execute", record)
     selects = [q.split(" FROM ")[0] for q in seen if "FROM lectures" in q and "ORDER BY" in q]

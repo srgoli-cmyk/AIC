@@ -1,5 +1,7 @@
 import { BACKEND_URL, WEB_PATH } from "./src/config.js";
 import { AUTO_KEY } from "./src/auto.js";
+import { authLogout } from "./src/auth.js";
+import { authErrorText } from "./src/authErrors.js";
 import { autoLine, courseLink, displayCode, formatState } from "./src/summary.js";
 
 const out = document.getElementById("out");
@@ -7,9 +9,42 @@ const status = document.getElementById("status");
 const open = document.getElementById("open");
 const auto = document.getElementById("auto");
 const autoOn = document.getElementById("auto-on");
+const syncAllBtn = document.getElementById("sync-all");
+const syncBtn = document.getElementById("sync");
+const authLoggedIn = document.getElementById("auth-logged-in");
+const authLoggedOut = document.getElementById("auth-logged-out");
+const userEmail = document.getElementById("user-email");
+const authLoginBtn = document.getElementById("auth-login");
+const authLogoutBtn = document.getElementById("auth-logout");
+const authErrorBox = document.getElementById("auth-error");
 let current = {};
 
 function render() {
+  // Update authentication UI elements
+  const hasAuth = Boolean(current.authToken && current.authUser);
+  authLoggedIn.hidden = !hasAuth;
+  authLoggedOut.hidden = hasAuth;
+  syncAllBtn.hidden = !hasAuth;
+  syncBtn.hidden = !hasAuth;
+  status.hidden = !hasAuth;
+  if (hasAuth) {
+    userEmail.textContent = current.authUser.email;
+    authErrorBox.hidden = true;
+  } else if (current.authError) {
+    authErrorBox.textContent = authErrorText(current.authError);
+    authErrorBox.hidden = false;
+  } else {
+    authErrorBox.hidden = true;
+  }
+
+  if (!hasAuth) {
+    status.textContent = "";
+    open.hidden = true;
+    auto.hidden = true;
+    return;
+  }
+
+  status.hidden = false;
   status.textContent = formatState(current.syncState, current.lastSync);
   const url = current.syncState?.status === "running" ? null : courseLink(current.lastSync, BACKEND_URL, WEB_PATH);
   open.hidden = !url;
@@ -35,6 +70,20 @@ function render() {
     autoOn.checked = rec.on === true;
   }
 }
+
+authLoginBtn.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "AUTH_LOGIN" }).catch(() => {});
+});
+
+authLogoutBtn.addEventListener("click", async () => {
+  await authLogout({ token: current.authToken, chrome });
+  current.authToken = undefined;
+  current.authUser = undefined;
+  current.lastSync = undefined;
+  current.syncState = undefined;
+  current[AUTO_KEY] = undefined;
+  render();
+});
 
 autoOn.addEventListener("change", async () => {
   const msg =
@@ -68,16 +117,27 @@ for (const [id, type] of [
   ["sync-all", "SYNC_ALL"],
 ]) {
   document.getElementById(id).addEventListener("click", async () => {
+    if (!current.authToken) {
+      status.hidden = false;
+      status.textContent = "Sign in with your @ucsd.edu Google account to sync courses.";
+      render();
+      return;
+    }
     const res = await send(type);
-    if (!res?.ok) status.textContent = `${res?.error || "Could not start."}\n${formatState(undefined, current.lastSync)}`;
+    if (!res?.ok) {
+      status.hidden = false;
+      status.textContent = `${res?.error || "Could not start."}\n${formatState(undefined, current.lastSync)}`;
+    }
   });
 }
+
+const STORAGE_KEYS = ["syncState", "lastSync", AUTO_KEY, "authToken", "authUser", "authError"];
 
 // Asking the worker first wakes it, so a sync that died is marked before the state is shown.
 // Opening the popup counts as seeing the new lectures, which clears the badge.
 send("STATUS")
   .then(() => send("SEEN"))
-  .then(() => chrome.storage.local.get(["syncState", "lastSync", AUTO_KEY]))
+  .then(() => chrome.storage.local.get(STORAGE_KEYS))
   .then((items) => {
     current = { ...current, ...items };
     render();
@@ -85,7 +145,7 @@ send("STATUS")
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  for (const key of ["syncState", "lastSync", AUTO_KEY]) {
+  for (const key of STORAGE_KEYS) {
     if (changes[key]) current[key] = changes[key].newValue;
   }
   render();

@@ -149,12 +149,16 @@ def choose(pages: list[Page], captions: list[str]) -> list[Page]:
     return chosen
 
 
-def slide_pages_for(entry_id: str, lecture: list[db.ChunkHit]) -> list[db.ChunkHit]:
+def slide_pages_for(
+    entry_id: str, lecture: list[db.ChunkHit], *, user_id: str
+) -> list[db.ChunkHit]:
     """The slide pages that go with this lecture, as passages, or [] when none clearly do."""
-    course_id = db.lecture_course(entry_id)
+    course_id = db.lecture_course(entry_id, user_id=user_id)
     if not course_id or not lecture:
         return []
-    pages = candidate_pages(db.course_pages(course_id, MAX_PAGES + 1), lecture[0].lecture_title)
+    pages = candidate_pages(
+        db.course_pages(course_id, MAX_PAGES + 1, user_id=user_id), lecture[0].lecture_title
+    )
     return [
         db.ChunkHit(
             p.doc_id, p.name, None, p.url, float(p.page), float(p.page), p.text, 0.0, p.page

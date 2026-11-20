@@ -15,7 +15,7 @@ from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
-from app import chunking, db, embeddings, ingest
+from app import auth_db, chunking, db, embeddings, ingest
 from app.chunking import chunk_cues
 from app.main import app, sync
 from app.schemas import SyncPayload
@@ -28,7 +28,13 @@ E1 = SAMPLE["lectures"][0]["entry_id"]
 E2 = SAMPLE["lectures"][1]["entry_id"]
 
 client = TestClient(app)
-run_ingestion = ingest.ingest_course  # the no_ingestion fixture replaces ingest.ingest_course
+UID = db.LOCAL_USER_ID
+USER = auth_db.UserRecord(id=UID, email="student@ucsd.edu", name="Test Student")
+_real_ingest_course = ingest.ingest_course  # the no_ingestion fixture replaces ingest.ingest_course
+
+
+def run_ingestion(course_id):
+    _real_ingest_course(course_id, user_id=UID)
 
 
 def _query(sql, params=None):
@@ -60,7 +66,7 @@ def _chunk_ids():
 @pytest.fixture
 def no_ingestion(monkeypatch):
     """Let /sync store data without the background ingestion, to drive it by hand."""
-    monkeypatch.setattr(ingest, "ingest_course", lambda course_id: None)
+    monkeypatch.setattr(ingest, "ingest_course", lambda course_id, *, user_id: None)
 
 
 @pytest.mark.integration
@@ -207,11 +213,12 @@ def test_dropped_caption_blocks_are_counted_in_a_warning(caplog):
 def test_ingestion_is_queued_not_run_inline(no_ingestion):
     """sync() only queues the work: the response is ready while nothing is chunked yet."""
     background = BackgroundTasks()
-    response = sync(SyncPayload.model_validate(SAMPLE), background)
+    response = sync(SyncPayload.model_validate(SAMPLE), background, USER)
     assert response.status == "accepted"
     assert len(background.tasks) == 1
     task = background.tasks[0]
-    assert task.func is ingest.ingest_course and task.args == (CID,)
+    assert task.func is ingest.ingest_course
+    assert task.args == (CID,) and task.kwargs == {"user_id": UID}
     assert _query("SELECT count(*) FROM chunks") == [(0,)]
     assert _indexed() is False
 
@@ -219,7 +226,7 @@ def test_ingestion_is_queued_not_run_inline(no_ingestion):
 @pytest.mark.integration
 def test_queued_ingestion_runs_when_the_background_tasks_run(monkeypatch):
     background = BackgroundTasks()
-    sync(SyncPayload.model_validate(SAMPLE), background)
+    sync(SyncPayload.model_validate(SAMPLE), background, USER)
     assert _indexed() is False
     asyncio.run(background())
     assert _indexed() is True
@@ -229,10 +236,10 @@ def test_queued_ingestion_runs_when_the_background_tasks_run(monkeypatch):
 def test_second_replace_for_the_same_captions_changes_nothing():
     _sync(SAMPLE)
     ids = _chunk_ids()
-    captions = db.lecture_captions(E1)
+    captions = db.lecture_captions(E1, user_id=UID)
     chunks = chunk_cues(parse_srt(captions))
     vectors = [[1.0] + [0.0] * 383] * len(chunks)
-    assert db.replace_chunks(E1, db.captions_hash(captions), chunks, vectors) is False
+    assert db.replace_chunks(E1, db.captions_hash(captions), chunks, vectors, user_id=UID) is False
     assert _chunk_ids() == ids
 
 
@@ -252,7 +259,9 @@ def test_refresh_waits_for_a_sync_that_is_still_writing_and_sees_its_lecture():
             ),
             {"c": CID},
         )
-        refresher = threading.Thread(target=db.refresh_indexed, args=(CID,))
+        refresher = threading.Thread(
+            target=db.refresh_indexed, args=(CID,), kwargs={"user_id": UID}
+        )
         refresher.start()
         time.sleep(0.5)  # refresh_indexed is now waiting on the course row
         assert refresher.is_alive()
@@ -317,10 +326,10 @@ def test_captions_changed_while_embedding_are_not_stored_under_the_new_hash(
         return vectors
 
     monkeypatch.setattr(embeddings, "embed", embed_then_edit)
-    ingest.ingest_lecture(E1)
+    ingest.ingest_lecture(E1, user_id=UID)
     assert _chunks(E1) == []
     assert _query("SELECT chunked_hash FROM lectures WHERE entry_id = :e", {"e": E1}) == [(None,)]
-    assert E1 in db.due_lecture_ids(CID)
+    assert E1 in db.due_lecture_ids(CID, user_id=UID)
 
 
 @pytest.mark.integration
@@ -339,7 +348,7 @@ def test_overlapping_ingestions_of_one_lecture_do_not_duplicate_chunks(monkeypat
     def run():
         barrier.wait()
         try:
-            ingest.ingest_lecture(E1)
+            ingest.ingest_lecture(E1, user_id=UID)
         except Exception as exc:  # noqa: BLE001
             errors.append(type(exc).__name__)
 
@@ -400,7 +409,7 @@ def test_importing_the_app_does_not_import_sentence_transformers():
 
 
 def test_ingest_course_never_raises_when_the_database_is_down(monkeypatch, caplog):
-    def down(course_id):
+    def down(course_id, *, user_id):
         raise ConnectionError("postgresql://user:hunter2@host/db")
 
     monkeypatch.setattr(db, "due_lecture_ids", down)
@@ -450,7 +459,7 @@ def test_python_and_postgres_hashes_agree_including_non_ascii():
     assert in_sql == db.captions_hash(captions)
     # The stored hash written by ingestion is the same value, so nothing is due afterwards.
     assert _query("SELECT chunked_hash FROM lectures") == [(in_sql,)]
-    assert db.due_lecture_ids(CID) == []
+    assert db.due_lecture_ids(CID, user_id=UID) == []
 
 
 @pytest.mark.integration
@@ -493,7 +502,7 @@ def test_rows_with_the_old_captions_only_hash_are_due(no_ingestion):
                 " encode(sha256(convert_to(captions_srt, 'UTF8')), 'hex')"
             )
         )
-    assert sorted(db.due_lecture_ids(CID)) == [E1, E2]
+    assert sorted(db.due_lecture_ids(CID, user_id=UID)) == [E1, E2]
     run_ingestion(CID)
-    assert db.due_lecture_ids(CID) == []
+    assert db.due_lecture_ids(CID, user_id=UID) == []
     assert _indexed() is True

@@ -599,17 +599,21 @@ def _check_quiz(questions: list[PracticeQuestion]) -> list[PracticeQuestion]:
 
 
 def study_lecture(
-    entry_id: str, kind: str, rng: random.Random | None = None
+    entry_id: str,
+    kind: str,
+    rng: random.Random | None = None,
+    *,
+    user_id: str,
 ) -> LessonResponse | CardsResponse | PracticeResponse:
     """Raises AnswerNotConfigured, AnswerUnavailable or LectureNotIndexed; main maps them."""
     if not settings.openrouter_api_key:
         raise answer.AnswerNotConfigured
-    chunks = db.lecture_chunks(entry_id)
+    chunks = db.lecture_chunks(entry_id, user_id=user_id)
     if not chunks:
         raise LectureNotIndexed
     given = passages_for(chunks)
     # The professor's slides for this lecture carry the numbers the captions only point at.
-    given += slidematch.slide_pages_for(entry_id, chunks)
+    given += slidematch.slide_pages_for(entry_id, chunks, user_id=user_id)
     # Now and then a reply is not the JSON that was asked for; one more try usually is.
     for attempt in (1, 2):
         made = _make(kind, given, rng)

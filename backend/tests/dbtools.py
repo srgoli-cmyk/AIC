@@ -8,7 +8,18 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
-TABLES = ("course_sites", "doc_chunks", "documents", "chunks", "files", "lectures", "courses")
+TABLES = (
+    "course_sites",
+    "doc_chunks",
+    "documents",
+    "chunks",
+    "files",
+    "lectures",
+    "courses",
+    "auth_exchange_codes",
+    "sessions",
+    "users",
+)
 
 
 def db_name(url: str) -> str:

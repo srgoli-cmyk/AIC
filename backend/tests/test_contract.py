@@ -78,6 +78,35 @@ def test_api_md_documents_the_lectures_endpoint():
     assert '[{"entry_id": "1_fake0001", "has_captions": true}]' in text
 
 
+def test_api_md_documents_auth_contract():
+    """Guard: the auth endpoints and @ucsd.edu rules stay documented in contracts/api.md."""
+    text = " ".join((ROOT / "contracts/api.md").read_text().split())
+    # Verify every auth route heading (web OAuth + extension handoff + session lifecycle) exists.
+    for heading in (
+        "## Auth",
+        "### GET /auth/google/login",
+        "### GET /auth/google/callback",
+        "### GET /auth/extension/done",
+        "### POST /auth/extension/exchange",
+        "### GET /auth/me",
+        "### POST /auth/logout",
+    ):
+        assert heading in text
+    # Ensure both extension bearer auth and server-side UCSD Google Workspace domain checks stay
+    # explicitly documented in the API contract.
+    assert "Authorization: Bearer <token>" in text
+    assert '`hd == "ucsd.edu"`' in text
+
+
+def test_settings_hides_google_client_secret_from_repr():
+    """Security: Settings.__repr__ must omit google_client_secret so logs/tracebacks stay safe."""
+    from app.config import Settings
+
+    # Dummy value to verify repr=False redaction (noqa silences Ruff's hardcoded-secret check S106).
+    rendered = repr(Settings(google_client_secret="super-secret-oauth-value"))  # noqa: S106
+    assert "super-secret-oauth-value" not in rendered
+
+
 @pytest.mark.parametrize(
     "path",
     [

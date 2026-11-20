@@ -520,3 +520,23 @@ test("a login problem and another course failure are told apart, with a status o
   const { deps } = setup({ server: { courseStatus: 500 } });
   await assert.rejects(runSync(deps), (e) => e.message === "Canvas request failed. (HTTP 500)");
 });
+
+test("signed out: AUTH_EXPIRED before any request, tab or injected call", async () => {
+  const { deps, scripting } = setup();
+  const requests = [];
+  const created = [];
+  const executed = [];
+  const origFetch = deps.fetch;
+  deps.fetch = async (url, init) => {
+    requests.push(String(url));
+    return origFetch(url, init);
+  };
+  deps.tabs = { create: async (o) => { created.push(o); return { id: 1 }; }, remove: async () => {} };
+  deps.scripting = { executeScript: async (o) => { executed.push(o); return scripting.executeScript(o); } };
+  for (const token of [undefined, null, ""]) {
+    await assert.rejects(runSync({ ...deps, token }), (e) => e.code === "AUTH_EXPIRED");
+  }
+  assert.deepEqual(requests, [], "no Canvas, Kaltura or backend request");
+  assert.deepEqual(created, []);
+  assert.deepEqual(executed, []);
+});
