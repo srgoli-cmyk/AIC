@@ -24,7 +24,11 @@ echo "== session for $SMOKE_EMAIL in $SMOKE_DB"
 TOKEN=$(cd backend && DATABASE_URL="postgresql://aic:aic@localhost:5432/$SMOKE_DB" \
   "../$VENV/bin/python" -m app.dev_session --email "$SMOKE_EMAIL" --ttl-hours 1)
 [[ -n "$TOKEN" ]] || { echo "could not make a session" >&2; exit 1; }
-AUTH=(-H "Authorization: Bearer $TOKEN")
+# The token goes to curl through a private config file, not the command line, where ps would show it.
+AUTH_CONFIG=$(mktemp)
+chmod 600 "$AUTH_CONFIG"
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" > "$AUTH_CONFIG"
+AUTH=(-K "$AUTH_CONFIG")
 
 # The test account and its fixture course are synthetic: never leave them behind.
 cleanup() {
@@ -37,6 +41,7 @@ cleanup() {
   docker compose exec -T db psql -U aic -d "$SMOKE_DB" -qc \
     "DELETE FROM users WHERE email = '$SMOKE_EMAIL'" >/dev/null \
     || { echo "could not remove $SMOKE_EMAIL from $SMOKE_DB" >&2; status=1; }
+  rm -f "$AUTH_CONFIG"
 }
 trap 'status=$?; cleanup; exit $status' EXIT
 
