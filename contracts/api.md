@@ -243,7 +243,6 @@ A reply from the model that cannot be read is asked for once more before the req
 ## Errors
 All errors use FastAPI's default shape: `{"detail": ...}`.
 - `401 {"detail": "not authenticated"}`: missing, invalid, or expired session cookie or bearer token.
-- `403 {"detail": "ucsd.edu account required"}`: Google account is not a verified `@ucsd.edu` Google Workspace account.
 - `503 {"detail": "auth service not configured"}`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` or `SESSION_SECRET` is not set, or `SESSION_SECRET` is shorter than 32 characters.
 - `503 {"detail": "database unavailable"}`: the database cannot be reached.
 - `503 {"detail": "answer service not configured"}`: no API key is set for `/ask`.
