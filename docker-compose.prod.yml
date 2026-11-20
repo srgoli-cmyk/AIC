@@ -1,0 +1,110 @@
+# Production: Postgres + pgvector, the backend, and Caddy in front with automatic HTTPS.
+# Sized for a 1 vCPU / 2 GB server with a 4 GB swap file (DEPLOY.md). Settings come from .env next
+# to this file (copied from .env.production.example); nothing secret is written here.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Only Caddy publishes ports. The database and the backend are reachable only on the private network.
+
+name: aic
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aic
+      POSTGRES_DB: aic
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # Small-server settings; vectors are 384 floats, so 128 MB of buffers is plenty.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aic -d aic"]
+      interval: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    networks: [internal]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: aic-backend:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://aic:${POSTGRES_PASSWORD}@db:5432/aic
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-haiku-5.5}
+      OPENROUTER_REASONING: ${OPENROUTER_REASONING-off}
+      OPENROUTER_STUDY_MODEL: ${OPENROUTER_STUDY_MODEL:-}
+      OPENROUTER_STUDY_REASONING: ${OPENROUTER_STUDY_REASONING:-}
+      OPENROUTER_CHECK_MODEL: ${OPENROUTER_CHECK_MODEL:-openai/gpt-5.6-luna}
+      OPENROUTER_CHECK_REASONING: ${OPENROUTER_CHECK_REASONING:-}
+      OPENROUTER_OCR_MODEL: ${OPENROUTER_OCR_MODEL:-google/gemini-3.5-flash}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID in .env}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      AUTH_REDIRECT_URI: https://${DOMAIN:?set DOMAIN in .env}/auth/google/callback
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-ucsd.edu}
+      # The first name is also the Host the container's own health check uses.
+      ALLOWED_HOSTS: ${DOMAIN}
+      COOKIE_SECURE: "true"
+      EXTENSION_ID: ${EXTENSION_ID:?set EXTENSION_ID in .env (the Chrome Web Store id)}
+    # The app writes no files; libraries may use /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    deploy:
+      resources:
+        limits:
+          memory: 1280M
+    networks: [internal]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [backend]
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env (for Let's Encrypt notices)}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    networks: [internal]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:

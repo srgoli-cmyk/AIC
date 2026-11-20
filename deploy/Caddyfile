@@ -1,0 +1,31 @@
+# Caddy in front of the backend: automatic HTTPS (Let's Encrypt) for $DOMAIN, everything proxied to
+# the backend on the private network. Caddy keeps no access log here, because sign-in URLs carry
+# one-time codes; the backend logs requests with those values redacted.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Slide uploads are up to 40 MB; refuse anything much bigger before it reaches the backend.
+	request_body {
+		max_size 45MB
+	}
+
+	reverse_proxy backend:8000 {
+		# Answers stream as Server-Sent Events: pass each piece on at once.
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+}
+
+# If www.$DOMAIN also points at this server, uncomment to send it to the main name:
+# www.{$DOMAIN} {
+# 	redir https://{$DOMAIN}{uri} permanent
+# }
