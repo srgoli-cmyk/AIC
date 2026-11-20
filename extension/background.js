@@ -43,6 +43,9 @@ controller.readAuto().then(showBadge).catch(() => {});
 // computer, so the first sync of the day happens when it's first used, not at 5 AM on a desk.
 async function tick() {
   if (controller.isRunning()) return;
+  // Signed out (never signed in, or the session ended): nothing runs until the student signs in.
+  const { authToken } = await chrome.storage.local.get("authToken");
+  if (!authToken) return;
   if (chrome.idle && (await chrome.idle.queryState(IDLE_SECONDS)) !== "active") return;
   await controller.recoverInterrupted();
   const courseId = pickDue(await controller.readAuto(), Date.now());

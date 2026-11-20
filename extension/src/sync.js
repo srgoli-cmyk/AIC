@@ -1,6 +1,6 @@
 // The sync orchestrator. Everything it touches is injected (fetch, tabs, scripting, clock), and
 // every step is sequential: one request or one injected call at a time.
-import { confirmBackend, getLectures, postSync } from "./backend.js";
+import { confirmBackend, confirmSession, getLectures, isExpired, postSync } from "./backend.js";
 import { fetchModuleFiles, isSlideFile, mergeFiles, slidesNote, syncSlides } from "./slides.js";
 import { fetchCourse, fetchFiles, fetchSections, findMediaGalleryUrl, isCanvasUrl, parseCourseId } from "./canvas.js";
 import {
@@ -161,6 +161,8 @@ export async function runSync(deps) {
 
   report({ stage: "backend", done: 0, total: 0 });
   await confirmBackend(fetchFn, backendUrl);
+  // An expired session stops here, before Canvas or Kaltura is touched. Sync all checks it once.
+  if (token && !deps.sessionChecked) await confirmSession(fetchFn, backendUrl, token);
 
   report({ stage: "course", done: 0, total: 0 });
   let course;
@@ -323,7 +325,8 @@ export async function runSync(deps) {
   let storedCount;
   try {
     storedCount = (await getLectures(fetchFn, backendUrl, courseId, token)).length;
-  } catch {
+  } catch (e) {
+    if (isExpired(e)) throw e;
     // The sync itself succeeded; estimate from what was known.
     storedCount = new Set([...storedBefore.keys(), ...entries.map((e) => e.id)]).size;
     notes.push("The stored lecture count could not be read after the sync, so it is an estimate.");

@@ -78,7 +78,7 @@ test("startup recovery marks an interrupted sync and closes its tab", async () =
 });
 
 test("the daily alarm is created, and a tick syncs a due course only while the computer is in use", async () => {
-  const stored = { autoSync: { 12345: { on: true, lastSuccess: 0, failures: 0, starts: [] } } };
+  const stored = { authToken: "tok_test", autoSync: { 12345: { on: true, lastSuccess: 0, failures: 0, starts: [] } } };
   const created = [];
   let onAlarm;
   let onState;

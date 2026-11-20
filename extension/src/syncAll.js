@@ -3,7 +3,7 @@
 // a Media Gallery still has its slides read; a course with neither is skipped. One course failing
 // does not stop the others, but a missing Canvas login or a backend problem stops the run, since
 // every later course would fail the same way.
-import { confirmBackend } from "./backend.js";
+import { confirmBackend, confirmSession } from "./backend.js";
 import { fetchMyCourses } from "./canvas.js";
 import { CANVAS_ORIGIN } from "./config.js";
 import { SyncError, messageFor } from "./errors.js";
@@ -11,7 +11,7 @@ import { displayCode } from "./summary.js";
 import { courseError, isEmptyGallery, runSync } from "./sync.js";
 
 // Problems that would repeat for every course.
-const STOPS_ALL = new Set(["CANVAS_LOGIN", "BACKEND_DOWN", "BACKEND_OTHER", "BACKEND_REJECTED", "KS_IN_PAYLOAD"]);
+const STOPS_ALL = new Set(["CANVAS_LOGIN", "BACKEND_DOWN", "BACKEND_OTHER", "BACKEND_REJECTED", "KS_IN_PAYLOAD", "AUTH_EXPIRED"]);
 
 /**
  * Returns { mode: "all", courses: [{ courseId, code, lectures, added, slides }], pending,
@@ -28,6 +28,8 @@ export async function runAllSync(deps) {
 
   report({ stage: "backend", done: 0, total: 0 });
   await confirmBackend(fetchFn, backendUrl);
+  // Once for the whole run, before any Canvas request; the per-course syncs skip their own check.
+  if (deps.token) await confirmSession(fetchFn, backendUrl, deps.token);
 
   report({ stage: "canvas", done: 0, total: 0 });
   let mine;
@@ -46,6 +48,7 @@ export async function runAllSync(deps) {
         ...deps,
         tabUrl: `${CANVAS_ORIGIN}/courses/${c.id}`,
         slidesOnlyOk: true,
+        sessionChecked: true,
         report: (patch) => report({ ...patch, ...where }),
       });
       courses.push({ courseId: s.courseId, code: s.code, lectures: s.lectures, added: s.added, slides: s.slides ?? null });

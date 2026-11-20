@@ -60,6 +60,15 @@ function updateUserHeader(user) {
   $("user-email").textContent = user.email;
 }
 
+// Any call that answers 401 means the session ended: stop and show the sign-in screen.
+api.onSignedOut(() => {
+  if (!state.user) return;
+  state.user = null;
+  state.stop?.abort();
+  updateUserHeader(null);
+  renderLogin("expired");
+});
+
 // Render sign-in landing screen for unauthenticated users
 function renderLogin(errorKey) {
   document.title = "Sign In · Lecture Search";

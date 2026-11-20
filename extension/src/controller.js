@@ -113,7 +113,13 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
       }
     } catch (e) {
       if (e instanceof SyncError && e.code === "AUTH_EXPIRED") {
-        await chrome.storage.local.remove(["authToken", "authUser"]).catch(() => {});
+        // Signed out: the popup shows Sign in; other settings stay.
+        try {
+          await chrome.storage.local.remove(["authToken", "authUser"]);
+          await chrome.storage.local.set({ authError: "session_expired" });
+        } catch {
+          // The next call finds the token rejected again.
+        }
       }
       await save({ status: "error", courseId, message: messageFor(e), ...(auto ? { mode: "auto" } : {}), ...(all ? { scope: "all" } : {}) });
       try {
