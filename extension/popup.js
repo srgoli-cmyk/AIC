@@ -1,6 +1,7 @@
 import { BACKEND_URL, WEB_PATH } from "./src/config.js";
 import { AUTO_KEY } from "./src/auto.js";
 import { authLogout } from "./src/auth.js";
+import { authErrorText } from "./src/authErrors.js";
 import { autoLine, courseLink, displayCode, formatState } from "./src/summary.js";
 
 const out = document.getElementById("out");
@@ -30,12 +31,7 @@ function render() {
     userEmail.textContent = current.authUser.email;
     authErrorBox.hidden = true;
   } else if (current.authError) {
-    const errMap = {
-      ucsd_only: "Only verified @ucsd.edu accounts are permitted.",
-      unverified_email: "Google email is not verified.",
-      exchange_failed: "Sign in exchange failed. Please try again.",
-    };
-    authErrorBox.textContent = errMap[current.authError] || "Sign in failed. Please try again.";
+    authErrorBox.textContent = authErrorText(current.authError);
     authErrorBox.hidden = false;
   } else {
     authErrorBox.hidden = true;

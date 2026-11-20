@@ -2,6 +2,7 @@
 // chrome.storage.local so the popup can close and reopen mid-sync. Only counts, the course id,
 // timestamps, fixed messages and stage names are stored.
 import { AUTO_KEY, afterFailure, afterSuccess } from "./auto.js";
+import { AUTH_ERR } from "./authErrors.js";
 import { confirmBackend } from "./backend.js";
 import { parseCourseId } from "./canvas.js";
 import { CANVAS_ORIGIN } from "./config.js";
@@ -116,7 +117,7 @@ export function createController({ chrome, fetch, backendUrl, now, sleep, keepAl
         // Signed out: the popup shows Sign in; other settings stay.
         try {
           await chrome.storage.local.remove(["authToken", "authUser"]);
-          await chrome.storage.local.set({ authError: "session_expired" });
+          await chrome.storage.local.set({ authError: AUTH_ERR.SESSION_EXPIRED });
         } catch {
           // The next call finds the token rejected again.
         }

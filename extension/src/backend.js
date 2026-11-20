@@ -19,7 +19,7 @@ export async function confirmBackend(fetchFn, base) {
   } catch {
     title = undefined;
   }
-  if (r.status === 401) throw new SyncError("AUTH_EXPIRED");
+  // No token is sent here, so a 401 means another app holds the port.
   if (title !== BACKEND_TITLE) throw new SyncError("BACKEND_OTHER");
 }
 

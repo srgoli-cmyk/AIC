@@ -4,6 +4,7 @@
 // URL, and remembers the nonce and the login tab in chrome.storage.session. The handoff page is
 // exchanged only in that tab, once, within PENDING_TTL_MS, together with the nonce. A code obtained
 // elsewhere (an attacker's own login) can't be exchanged because it was not bound to this nonce.
+import { AUTH_ERR, BACKEND_AUTH_ERRORS } from "./authErrors.js";
 import { BACKEND_URL } from "./config.js";
 
 export const PENDING_KEY = "pendingLogin";
@@ -116,13 +117,14 @@ async function handleOne({ url, tabId, chrome, fetchFn = fetch, backendUrl = BAC
           authError: null,
         });
       } else {
-        await chrome.storage.local.set({ authError: "exchange_failed" });
+        await chrome.storage.local.set({ authError: AUTH_ERR.EXCHANGE_FAILED });
       }
     } catch {
-      await chrome.storage.local.set({ authError: "network_error" });
+      await chrome.storage.local.set({ authError: AUTH_ERR.NETWORK_ERROR });
     }
   } else if (error) {
-    await chrome.storage.local.set({ authError: error });
+    const known = BACKEND_AUTH_ERRORS.includes(error) ? error : AUTH_ERR.LOGIN_FAILED;
+    await chrome.storage.local.set({ authError: known });
   }
 
   // Close the login handoff tab

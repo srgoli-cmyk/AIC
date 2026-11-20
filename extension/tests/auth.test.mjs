@@ -259,6 +259,39 @@ test("handleAuthRedirect records error parameter and closes tab", async () => {
   assert.deepEqual(closedTabs, [99]);
 });
 
+test("handleAuthRedirect passes only known backend error keys through, else login_failed", async () => {
+  for (const [given, stored] of [["login_failed", "login_failed"], ["ucsd_only", "ucsd_only"], ["network_error", "login_failed"], ["<b>x</b>", "login_failed"], ["unverified_email", "login_failed"]]) {
+    const h = makeChromeStorage();
+    withPending(h, { tabId: 7 });
+    await handleAuthRedirect({
+      url: `${BASE}/auth/extension/done?error=${encodeURIComponent(given)}`,
+      tabId: 7,
+      chrome: h.chrome,
+      fetchFn: async () => res({}),
+      backendUrl: BASE,
+      now: () => T0 + 1000,
+    });
+    assert.equal(h.store.authError, stored, given);
+  }
+});
+
+test("handleAuthRedirect records network_error when the exchange request throws", async () => {
+  const h = makeChromeStorage();
+  withPending(h, { tabId: 11 });
+  await handleAuthRedirect({
+    url: `${BASE}/auth/extension/done?code=some_code`,
+    tabId: 11,
+    chrome: h.chrome,
+    fetchFn: async () => {
+      throw new TypeError("fetch failed");
+    },
+    backendUrl: BASE,
+    now: () => T0 + 1000,
+  });
+  assert.equal(h.store.authError, "network_error");
+  assert.equal(h.store.authToken, undefined);
+});
+
 test("handleAuthRedirect records exchange_failed on non-200 exchange response", async () => {
   const h = makeChromeStorage();
   const { chrome, store } = h;

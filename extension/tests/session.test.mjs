@@ -18,7 +18,16 @@ test("every backend call turns a 401 into AUTH_EXPIRED", async () => {
   await assert.rejects(confirmSession(always401, BASE, TOKEN), expired);
   await assert.rejects(getLectures(always401, BASE, COURSE, TOKEN), expired);
   await assert.rejects(postSync(always401, BASE, { lectures: [] }, TOKEN), expired);
-  await assert.rejects(confirmBackend(async () => res("", { status: 401 }), BASE), expired);
+});
+
+test("a 401 on /openapi.json means another app: BACKEND_OTHER, and the token is kept", async () => {
+  await assert.rejects(confirmBackend(async () => res("", { status: 401 }), BASE), (e) => e instanceof SyncError && e.code === "BACKEND_OTHER");
+  const wrap = (f) => async (url, init) => (String(url).endsWith("/openapi.json") ? res("", { status: 401 }) : f(url, init));
+  const { controller, store } = controllerSetup({}, {}, wrap);
+  await controller.handle({ type: "SYNC" });
+  await settle(store);
+  assert.equal(store.authToken, "tok_test");
+  assert.equal(store.syncState.message, MESSAGES.BACKEND_OTHER);
 });
 
 test("confirmSession sends the Bearer token without credentials and reports other failures", async () => {
@@ -137,7 +146,7 @@ test("sync all: the session is confirmed once, and the first AUTH_EXPIRED stops 
   assert.equal(w.requests.filter((r) => r.endsWith("/auth/me")).length, 1);
 });
 
-function controllerSetup(server = {}, extraStore = {}) {
+function controllerSetup(server = {}, extraStore = {}, wrapFetch = (f) => f) {
   const t = tracker();
   const k = makeKaf({ tracker: tracker() });
   const s = makeServer({ tracker: t, ...server });
@@ -158,7 +167,7 @@ function controllerSetup(server = {}, extraStore = {}) {
   };
   let idle = 0;
   const clock = fakeClock();
-  const controller = createController({ chrome, fetch: s.fetch, backendUrl: BASE, now: () => Date.parse("2026-11-03T12:00:00Z"), sleep: clock.sleep, onIdle: () => idle++ });
+  const controller = createController({ chrome, fetch: wrapFetch(s.fetch), backendUrl: BASE, now: () => Date.parse("2026-11-03T12:00:00Z"), sleep: clock.sleep, onIdle: () => idle++ });
   return { controller, store, s, tabs, scripting, idle: () => idle };
 }
 
