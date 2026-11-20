@@ -1,14 +1,14 @@
 // Calls to the FastAPI backend (contracts/api.md). Errors carry a message that is safe to show.
 import { DEMO_COURSES, demoAnswer, demoCourse, demoStudy } from "./demo.js";
 import { BackendError, Stopped, StreamUnavailable } from "./errors.js";
+import { backendFor } from "./backendurl.js";
 import { streamAnswer } from "./stream.js";
 
 export { BackendError, Stopped, StreamUnavailable };
 
 const params = new URLSearchParams(location.search);
-// Served by the backend at /app/: same origin. Served on its own (`make web`): the default port.
-const sameOrigin = location.pathname.startsWith("/app/");
-export const BACKEND = (params.get("backend") || (sameOrigin ? location.origin : "http://localhost:8000")).replace(/\/$/, "");
+// Its own origin at /app/; ?backend= only for another local port (src/backendurl.js).
+export const BACKEND = backendFor(location, params);
 export let demo = params.has("demo");
 
 
