@@ -2,6 +2,7 @@
 
   python3 scripts/check_manifest.py                              the dev build (extension/)
   python3 scripts/check_manifest.py --prod <zip> --domain <d>    a production build
+  python3 scripts/check_manifest.py --prod <zip> --domain <d> --team   a team build (dev key kept)
 """
 
 import argparse
@@ -54,12 +55,16 @@ def check_dev(m: dict) -> list[str]:
     return errors
 
 
-def check_prod(m: dict, files: set[str], config_js: str, domain: str) -> list[str]:
+def check_prod(m: dict, files: set[str], config_js: str, domain: str, team: bool = False) -> list[str]:
     backend = f"https://{domain}/*"
     errors = common(m, CANVAS_HOSTS | {backend})
     if backend not in m.get("host_permissions", []):
         errors.append(f"host_permissions must include {backend}")
-    if "key" in m:
+    if team:
+        key = m.get("key")
+        if not isinstance(key, str) or hashlib.sha256(key.encode()).hexdigest() != EXPECTED_KEY_SHA256:
+            errors.append("a team build must carry the dev key (the dev extension id)")
+    elif "key" in m:
         errors.append("a production build must not carry the dev key (the Web Store assigns the id)")
     if m.get("name") != PROD_NAME:
         errors.append(f"name must be {PROD_NAME!r}")
@@ -78,6 +83,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--prod", type=Path, help="a production zip to check instead of extension/")
     ap.add_argument("--domain")
+    ap.add_argument("--team", action="store_true", help="with --prod: the build keeps the dev key")
     args = ap.parse_args()
     if args.prod:
         if not args.domain:
@@ -86,7 +92,8 @@ def main() -> int:
             files = set(z.namelist())
             m = json.loads(z.read("manifest.json"))
             config_js = z.read("src/config.js").decode()
-        errors, label = check_prod(m, files, config_js, args.domain), "production manifest"
+        label = "team manifest" if args.team else "production manifest"
+        errors = check_prod(m, files, config_js, args.domain, team=args.team)
     else:
         errors, label = check_dev(json.loads((ROOT / "extension/manifest.json").read_text())), "manifest"
     for e in errors:

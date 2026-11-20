@@ -170,7 +170,14 @@ docker compose -f docker-compose.prod.yml start backend
 ```
 
 ## 9. The extension for students
-On your computer:
+Until the Web Store listing exists, teammates can use a build that keeps the dev id
+`gdgflcpoijokbdnckcojphfoinhkbbmd` (the server's `EXTENSION_ID` from section 5):
+```bash
+make extension-team DOMAIN=ailecture.app     # writes dist/extension-team.zip
+```
+Unzip it, then `chrome://extensions` → Developer mode → **Load unpacked** → the unzipped folder.
+
+For the Web Store, on your computer:
 ```bash
 make extension-prod DOMAIN=ailecture.app     # writes dist/extension-prod.zip
 ```

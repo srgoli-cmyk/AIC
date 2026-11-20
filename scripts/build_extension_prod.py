@@ -6,7 +6,11 @@ The dev build in extension/ is not changed. The copy differs in:
   icons 16/48/128, and no "key" (the Web Store assigns its own id, which goes in EXTENSION_ID);
 - no tests, notes or package.json.
 
-Usage: python3 scripts/build_extension_prod.py --domain ailecture.app [--out dist/extension-prod.zip]
+With --team the manifest keeps the dev "key", so the unpacked extension has the dev id
+gdgflcpoijokbdnckcojphfoinhkbbmd: teammates load it unpacked against the server until the Web Store
+listing exists, and the server's EXTENSION_ID stays the dev id meanwhile.
+
+Usage: python3 scripts/build_extension_prod.py --domain ailecture.app [--team] [--out <zip>]
 """
 
 import argparse
@@ -27,8 +31,8 @@ DEV_BACKEND = 'export const BACKEND_URL = "http://localhost:8000";'
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
-def prod_manifest(dev: dict, domain: str) -> dict:
-    m = {k: v for k, v in dev.items() if k != "key"}
+def prod_manifest(dev: dict, domain: str, keep_key: bool = False) -> dict:
+    m = {k: v for k, v in dev.items() if keep_key or k != "key"}
     m["name"] = NAME
     m["description"] = "Syncs your UCSD lecture captions and slides from Canvas to AI Lecture Search."
     hosts = [h for h in dev["host_permissions"] if not h.startswith("http://localhost")]
@@ -38,7 +42,7 @@ def prod_manifest(dev: dict, domain: str) -> dict:
     return m
 
 
-def build(domain: str, out: Path) -> Path:
+def build(domain: str, out: Path, keep_key: bool = False) -> Path:
     if not DOMAIN_RE.match(domain):
         sys.exit(f"not a plain domain name: {domain!r}")
     with tempfile.TemporaryDirectory() as tmp:
@@ -49,7 +53,7 @@ def build(domain: str, out: Path) -> Path:
         if text.count(DEV_BACKEND) != 1:
             sys.exit("src/config.js no longer has the expected BACKEND_URL line; update this script")
         config.write_text(text.replace(DEV_BACKEND, f'export const BACKEND_URL = "https://{domain}";'))
-        manifest = prod_manifest(json.loads((SRC / "manifest.json").read_text()), domain)
+        manifest = prod_manifest(json.loads((SRC / "manifest.json").read_text()), domain, keep_key)
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         (stage / "icons").mkdir()
         for n in (16, 48, 128):
@@ -68,9 +72,11 @@ def build(domain: str, out: Path) -> Path:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--domain", required=True)
-    ap.add_argument("--out", type=Path, default=ROOT / "dist/extension-prod.zip")
+    ap.add_argument("--team", action="store_true", help="keep the dev key (the dev extension id)")
+    ap.add_argument("--out", type=Path)
     args = ap.parse_args()
-    out = build(args.domain.strip().lower(), args.out)
+    out = args.out or ROOT / ("dist/extension-team.zip" if args.team else "dist/extension-prod.zip")
+    out = build(args.domain.strip().lower(), out, keep_key=args.team)
     print(f"wrote {out.relative_to(ROOT) if out.is_relative_to(ROOT) else out}")
     return 0
 
