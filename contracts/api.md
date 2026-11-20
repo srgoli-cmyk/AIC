@@ -20,6 +20,12 @@ Clients authenticate in one of two ways:
 
 Student data (courses, lectures, documents, chunks) is private per student.
 
+### Origins and CORS
+- CORS allows exactly one cross-origin caller, the extension at `chrome-extension://<extension id>` (env `EXTENSION_ID`). Responses never carry `Access-Control-Allow-Credentials`. Allowed request headers are `Content-Type` and `Authorization`.
+- Every `POST`, `PUT` and `DELETE` is checked before the body is read. It is accepted if it has no `Origin` header, if `Origin` equals the backend's own origin (request scheme and `Host`), or if it has a valid `Authorization: Bearer <token>`. Otherwise the response is `403 {"detail": "origin not allowed"}` and nothing runs.
+- `POST /auth/extension/exchange` is not checked: it takes no cookie or token, and the one-time code and nonce protect it.
+- Browser pages use the `aic_session` cookie and must be served by the backend (`/app/`).
+
 ### GET /auth/google/login
 Query parameters:
 - `client` is `"web"` (default) or `"extension"`.

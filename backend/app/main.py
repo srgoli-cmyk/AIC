@@ -5,7 +5,6 @@ chunked and embedded in the background (app/ingest.py); /ask answers from the st
 
 import json
 import logging
-import re
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,7 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from . import answer, auth, auth_db, coursesite, db, embeddings, ingest, slides, study
-from .config import settings
+from .config import extension_origin, settings
+from .origin import OriginCheckMiddleware
 from .schemas import (
     AskRequest,
     AskResponse,
@@ -79,29 +79,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="AI Lecture Search", version="0.0.1", lifespan=lifespan)
 
-# The extension calls us from its background service worker (host_permissions cover
-# localhost), so CORS mainly matters for the dev UI and console snippets.
+# Added first, so it sits inside CORS: every POST/PUT/DELETE is refused from a foreign Origin
+# (see origin.py) before routing, body parsing or any work.
+app.add_middleware(OriginCheckMiddleware)
+
+# CORS: only our extension may read responses cross-origin. No credentials: the page is served
+# same-origin at /app/ (cookie), and the extension sends a Bearer token. If EXTENSION_ID is
+# invalid, no origin is allowed at all.
+_extension_origin = extension_origin(settings.extension_id)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=settings.cors_origin_regex,
-    allow_credentials=True,
+    allow_origins=[_extension_origin] if _extension_origin else [],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
 app.include_router(auth.router)
-
-
-def _trusted_origin(request: Request) -> None:
-    """Calls that change or cost something are refused from other web pages. A browser sends
-    `Origin` with a cross-site request, and a POST with no body needs no CORS preflight, so CORS
-    alone would not stop a page from starting a paid web search or a delete."""
-    origin = request.headers.get("origin")
-    if origin and not re.fullmatch(settings.cors_origin_regex, origin):
-        raise HTTPException(status_code=403, detail="origin not allowed")
-
-
-TRUSTED = [Depends(_trusted_origin)]
 
 # The signed-in student, from the auth dependency (Annotated avoids the B008 linter warning).
 # There is no default: a route cannot run without a user.
@@ -256,7 +250,7 @@ async def ask_stream(
     current_user: CurrentUser,
 ) -> StreamingResponse:
     """Like /ask, but the answer arrives as server-sent events (see contracts/api.md). Read-only
-    like /ask, so no origin check. Failures before the model is called are plain HTTP errors."""
+    like /ask. Failures before the model is called are plain HTTP errors."""
     # The database and the embedding model are synchronous: run them off the event loop.
     if not await run_in_threadpool(db.course_exists, req.course_id, user_id=current_user.id):
         raise HTTPException(status_code=404, detail="course not synced")
@@ -297,7 +291,6 @@ def course_documents(
 @app.put(
     "/courses/{course_id}/documents/canvas/{canvas_file_id}",
     response_model=DocumentStored,
-    dependencies=TRUSTED,
 )
 async def put_canvas_document(
     course_id: str,
@@ -401,7 +394,7 @@ def course_site(
     return db.get_site(course_id, user_id=current_user.id)
 
 
-@app.post("/courses/{course_id}/site/search", response_model=SiteSearch, dependencies=TRUSTED)
+@app.post("/courses/{course_id}/site/search", response_model=SiteSearch)
 def search_course_site(
     course_id: str,
     background: BackgroundTasks,
@@ -437,7 +430,7 @@ def search_course_site(
     return SiteSearch(site=current, candidates=candidates)
 
 
-@app.put("/courses/{course_id}/site", response_model=SiteInfo, dependencies=TRUSTED)
+@app.put("/courses/{course_id}/site", response_model=SiteInfo)
 def pick_course_site(
     course_id: str,
     pick: SitePick,
@@ -457,7 +450,7 @@ def pick_course_site(
     return site
 
 
-@app.post("/courses/{course_id}/site/sync", response_model=SiteInfo, dependencies=TRUSTED)
+@app.post("/courses/{course_id}/site/sync", response_model=SiteInfo)
 def resync_course_site(
     course_id: str,
     background: BackgroundTasks,
@@ -473,7 +466,7 @@ def resync_course_site(
     return db.get_site(course_id, user_id=current_user.id)
 
 
-@app.delete("/courses/{course_id}/site", status_code=204, dependencies=TRUSTED)
+@app.delete("/courses/{course_id}/site", status_code=204)
 def forget_course_site(
     course_id: str,
     current_user: CurrentUser,
@@ -484,9 +477,7 @@ def forget_course_site(
     return Response(status_code=204)
 
 
-@app.delete(
-    "/courses/{course_id}/documents/canvas/{canvas_file_id}", status_code=204, dependencies=TRUSTED
-)
+@app.delete("/courses/{course_id}/documents/canvas/{canvas_file_id}", status_code=204)
 def delete_canvas_document(
     course_id: str,
     canvas_file_id: int,

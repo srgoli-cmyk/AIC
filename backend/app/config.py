@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,10 +40,10 @@ class Settings:
     openrouter_check_reasoning: str = os.getenv("OPENROUTER_CHECK_REASONING", "")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     embedding_dim: int = int(os.getenv("EMBEDDING_DIM", "384"))
-    cors_origin_regex: str = os.getenv(
-        "CORS_ORIGIN_REGEX",
-        r"^(chrome-extension://[a-p]{32}|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?)$",
-    )
+    # The one browser extension allowed to call us cross-origin (CORS), by its Chrome id: 32
+    # letters a-p. The default is the stable id that the manifest key gives. CORS_ORIGIN_REGEX
+    # is gone: a regex could be widened to web pages, and the page is served same-origin.
+    extension_id: str = os.getenv("EXTENSION_ID", "gdgflcpoijokbdnckcojphfoinhkbbmd")
     # Google OAuth 2.0 (Sign in with UCSD Google). Both id and secret must be set for auth login.
     # Just getting everything from env file
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -60,6 +61,21 @@ class Settings:
 
 
 settings = Settings()
+
+EXTENSION_ID_RE = re.compile(r"[a-p]{32}")
+
+
+def extension_origin(extension_id: str) -> str | None:
+    """`chrome-extension://<id>` for a valid Chrome extension id, else None. A bad value is
+    logged (the setting's name only, never the value) and then no extension is allowed."""
+    cleaned = extension_id.strip()
+    if EXTENSION_ID_RE.fullmatch(cleaned):
+        return f"chrome-extension://{cleaned}"
+    logging.getLogger("aic").warning(
+        "EXTENSION_ID is not 32 letters a-p; no browser extension is allowed"
+    )
+    return None
+
 
 REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 _warned: set[str] = set()  # setting names already warned about

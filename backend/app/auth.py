@@ -194,13 +194,20 @@ def check_id_token_claims(
 # --- Request user extraction ---
 
 
-def extract_session_token(request: Request) -> str | None:
-    """Extract raw session token from either Authorization header or aic_session cookie."""
+def bearer_token(request: Request) -> str | None:
+    """The token in `Authorization: Bearer <token>`, or None."""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        token = auth_header[len("Bearer ") :].strip()
-        if token:
-            return token
+        return auth_header[len("Bearer ") :].strip() or None
+    return None
+
+
+def extract_session_token(request: Request) -> str | None:
+    """Extract raw session token from either Authorization header or aic_session cookie. A
+    Bearer token wins over the cookie, and a bad one is not retried as the cookie."""
+    token = bearer_token(request)
+    if token:
+        return token
     cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
     if cookie_token:
         return cookie_token.strip()

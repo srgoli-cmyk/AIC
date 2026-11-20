@@ -170,10 +170,12 @@ def test_other_web_pages_cannot_start_a_search_or_delete(course, monkeypatch):
     assert client.delete(f"/courses/{CID}/site", headers=evil).status_code == 403
     assert client.delete(f"/courses/{CID}/documents/canvas/7", headers=evil).status_code == 403
     assert calls == []
-    ext = {"Origin": "chrome-extension://" + "a" * 32}
-    assert client.post(f"/courses/{CID}/site/search", headers=ext).status_code == 200
-    local = {"Origin": "http://localhost:8000"}
-    assert client.post(f"/courses/{CID}/site/search", headers=local).status_code == 200
+    # Another localhost port is another origin; the backend's own (the page at /app/) is fine.
+    # An extension with a Bearer token is covered in test_origin.py.
+    other_port = {"Origin": "http://localhost:3000"}
+    assert client.post(f"/courses/{CID}/site/search", headers=other_port).status_code == 403
+    own = {"Origin": "http://testserver"}
+    assert client.post(f"/courses/{CID}/site/search", headers=own).status_code == 200
 
 
 @pytest.mark.integration
