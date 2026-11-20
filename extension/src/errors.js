@@ -26,7 +26,7 @@ export const MESSAGES = {
   NOTHING_TO_SYNC: "This course has no Media Gallery and no slide files.",
   NO_CANVAS_COURSES: "Canvas lists no active courses for you.",
   AUTH_REQUIRED: "Sign in with your @ucsd.edu Google account to sync courses.",
-  AUTH_EXPIRED: "Session expired. Please sign in again.",
+  AUTH_EXPIRED: "Your session ended. Sign in again.",
   UNKNOWN: "Sync failed.",
 };
 

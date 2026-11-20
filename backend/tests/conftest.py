@@ -13,6 +13,9 @@ MAIN_URL, TEST_URL = dbtools.resolve_urls()
 os.environ["DATABASE_URL"] = TEST_URL  # must happen before any `import app...`
 # An existing variable (even an empty one) wins over .env, so no real key is ever loaded in tests.
 os.environ["OPENROUTER_API_KEY"] = ""
+# TestClient sends `Host: testserver`; allow it in tests only. The production default
+# (localhost, 127.0.0.1) is checked in test_config_defaults.py and test_trusted_host.py.
+os.environ["ALLOWED_HOSTS"] = "localhost,127.0.0.1,testserver"
 # Cap libpq connection timeout in tests so unreachable mock hosts (127.0.0.1:1) fail fast on Windows
 os.environ.setdefault("PGCONNECT_TIMEOUT", "2")
 
@@ -24,17 +27,34 @@ if not dbtools.db_name(settings.database_url).endswith("_test"):
     raise SystemExit("test database name must end in _test")
 
 
+def _prepare_test_database() -> None:
+    """Create the test database if needed and apply the schema. Raises OperationalError or
+    InterfaceError when Postgres is unreachable."""
+    try:
+        db.apply_schema()
+    except (OperationalError, InterfaceError):
+        # Probably the test database does not exist yet; try to create it.
+        dbtools.create_database_if_missing(MAIN_URL, TEST_URL)
+        db.apply_schema()
+
+
+def pytest_sessionstart(session):
+    """Prepare the database before any test runs. Without this, a test that is not marked
+    `integration` but still calls the database (test_ask.py) fails on the first run after
+    `aic_test` was dropped. If Postgres is unreachable, do nothing here: the `_test_database`
+    fixture below fails the integration tests, and the others fail on their own database call."""
+    try:
+        _prepare_test_database()
+    except (OperationalError, InterfaceError):
+        pass
+
+
 @pytest.fixture(scope="session")
 def _test_database() -> None:
-    """Create the test database if needed and apply the schema. Fails (never skips) when Postgres
+    """Make sure the test database exists with the schema. Fails (never skips) when Postgres
     is unreachable, so the gate cannot pass silently."""
     try:
-        try:
-            db.apply_schema()
-        except (OperationalError, InterfaceError):
-            # Probably the test database does not exist yet; try to create it.
-            dbtools.create_database_if_missing(MAIN_URL, TEST_URL)
-            db.apply_schema()
+        _prepare_test_database()
     except (OperationalError, InterfaceError):
         pytest.fail("Postgres is not reachable: run `make db` and retry.", pytrace=False)
 

@@ -172,6 +172,7 @@ export function makeServer(opts = {}) {
       const u = new URL(url);
       requests.push({ url: String(url), method: init.method || "GET", body: init.body, init });
       if (u.origin === "http://localhost:8000") {
+        if (o.expireOn?.(u.pathname, init.method || "GET")) return res({ detail: "not authenticated" }, { status: 401 });
         if (u.pathname === "/openapi.json") {
           if (o.backendDown) throw new TypeError("Failed to fetch");
           return res({ info: { title: o.backendTitle ?? "AI Lecture Search" } });
@@ -188,6 +189,10 @@ export function makeServer(opts = {}) {
           if (o.syncStatus) return res({ detail: "no" }, { status: o.syncStatus });
           o.posted = JSON.parse(init.body);
           return res({ status: "accepted", lectures_skipped_other_course: o.skippedOther ?? 0 });
+        }
+        if (u.pathname === "/auth/me") {
+          if (o.sessionExpired) return res({ detail: "not authenticated" }, { status: 401 });
+          return res({ id: "usr_1", email: "student@ucsd.edu", name: "Test Student" });
         }
         if (u.pathname === "/health") return res({ status: "ok" });
       }
@@ -268,6 +273,7 @@ export function baseDeps({ server, scripting, tabs = makeTabs(), clock = fakeClo
     tabs,
     scripting,
     backendUrl: "http://localhost:8000",
+    token: "test_session_token",
     now: () => Date.parse("2026-11-03T12:00:00Z") + clock.now(),
     sleep: clock.sleep,
     report: () => {},

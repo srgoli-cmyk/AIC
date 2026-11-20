@@ -3,7 +3,7 @@
 // A file is sent once: the backend reports the version it holds, and unchanged files are skipped.
 // Nothing here keeps a file, its signed download link or its contents after the request.
 import { CANVAS_ORIGIN, FETCH_TIMEOUT_MS, FILE_DOWNLOAD_HOSTS, MAX_SLIDE_BYTES, MAX_SLIDE_FILES, SLIDE_TIMEOUT_MS } from "./config.js";
-import { confirmBackend, courseKey } from "./backend.js";
+import { confirmBackend, courseKey, isExpired, throwIfExpired } from "./backend.js";
 import { getList, stripPrefix } from "./canvas.js";
 import { clipText, timeoutSignal } from "./util.js";
 
@@ -165,6 +165,7 @@ async function storedVersions(fetchFn, base, courseId, token = null) {
     headers,
     signal: timeoutSignal(FETCH_TIMEOUT_MS),
   });
+  throwIfExpired(r);
   if (!r.ok) throw new Error("documents");
   const list = JSON.parse(await r.text());
   return new Map((Array.isArray(list) ? list : []).filter((d) => typeof d?.doc_id === "string").map((d) => [d.doc_id, d.version]));
@@ -173,7 +174,8 @@ async function storedVersions(fetchFn, base, courseId, token = null) {
 /**
  * Sends every new or changed slide file of the course to the backend.
  * Returns { found, sent, unchanged, failed, unreadable, later }. Never throws: slides are an
- * extra, and a failure here must not fail the lecture sync that already succeeded.
+ * extra, and a failure here must not fail the lecture sync that already succeeded. The one
+ * exception is a 401 from the backend (AUTH_EXPIRED), which means the student is signed out.
  */
 export async function syncSlides({ fetchFn, backendUrl, courseId, files, token = null, report = () => {} }) {
   const out = { found: 0, sent: 0, unchanged: 0, failed: 0, unreadable: 0, later: 0, older: 0 };
@@ -186,7 +188,8 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, token =
   try {
     await confirmBackend(fetchFn, backendUrl);
     stored = await storedVersions(fetchFn, backendUrl, courseId, token);
-  } catch {
+  } catch (e) {
+    if (isExpired(e)) throw e;
     out.failed = slides.length;
     return out;
   }
@@ -217,12 +220,14 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, token =
           body: bytes,
           signal: timeoutSignal(SLIDE_TIMEOUT_MS),
         });
+        throwIfExpired(r);
         if (r.ok) {
           out.sent++;
           current.add(file.id);
         } else if (r.status === 422) out.unreadable++; // scanned pages, or not really a PDF
         else out.failed++;
-      } catch {
+      } catch (e) {
+        if (isExpired(e)) throw e;
         out.failed++;
       }
     }
@@ -234,13 +239,15 @@ export async function syncSlides({ fetchFn, backendUrl, courseId, files, token =
     if (!stored.has(`canvas-file-${id}`) || !current.has(replacedBy.get(id))) continue;
     try {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${id}`, {
+      const d = await fetchFn(`${backendUrl}/courses/${courseKey(courseId)}/documents/canvas/${id}`, {
         method: "DELETE",
         credentials: "omit",
         headers,
         signal: timeoutSignal(FETCH_TIMEOUT_MS),
       });
-    } catch {
+      throwIfExpired(d);
+    } catch (e) {
+      if (isExpired(e)) throw e;
       // Left for the next sync.
     }
   }

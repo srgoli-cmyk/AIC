@@ -19,7 +19,34 @@ export async function confirmBackend(fetchFn, base) {
   } catch {
     title = undefined;
   }
+  // No token is sent here, so a 401 means another app holds the port.
   if (title !== BACKEND_TITLE) throw new SyncError("BACKEND_OTHER");
+}
+
+export const isExpired = (e) => e instanceof SyncError && e.code === "AUTH_EXPIRED";
+
+/** Any 401 from the backend means the session is gone. */
+export function throwIfExpired(r) {
+  if (r?.status === 401) throw new SyncError("AUTH_EXPIRED");
+}
+
+/**
+ * GET /auth/me with the Bearer token: confirms the session before anything touches Canvas or
+ * Kaltura. 401 is AUTH_EXPIRED. Nothing from the reply is kept.
+ */
+export async function confirmSession(fetchFn, base, token) {
+  let r;
+  try {
+    r = await fetchFn(`${base}/auth/me`, {
+      credentials: "omit",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    });
+  } catch {
+    throw new SyncError("BACKEND_DOWN");
+  }
+  throwIfExpired(r);
+  if (!r.ok) throw new SyncError("BACKEND_REJECTED", `HTTP ${Number(r.status) | 0}`);
 }
 
 /** [{ entry_id, has_captions }]; a course the backend does not know has none. */

@@ -634,13 +634,9 @@ def doc_id_for(url: str) -> str:
     return "web-" + hashlib.sha256(url.encode()).hexdigest()[:24]
 
 
-def facts_for(course_id: str, *, user_id: str = db.LOCAL_USER_ID) -> CourseFacts | None:
+def facts_for(course_id: str, *, user_id: str) -> CourseFacts | None:
     """What the backend knows about a synced course, for checking a site against it."""
-    row = (
-        db.course_facts(course_id)
-        if user_id == db.LOCAL_USER_ID
-        else db.course_facts(course_id, user_id=user_id)
-    )
+    row = db.course_facts(course_id, user_id=user_id)
     if row is None:
         return None
     code, name, term, instructors, dates = row
@@ -667,9 +663,7 @@ class SiteChanged(Exception):
     the sync stops."""
 
 
-def sync_site(
-    course_id: str, site_url: str, progress=None, *, user_id: str = db.LOCAL_USER_ID
-) -> SiteSync:
+def sync_site(course_id: str, site_url: str, progress=None, *, user_id: str) -> SiteSync:
     """Download the lecture material of a checked course site and store it as the course's
     documents (source "web"), each with the lecture number it belongs to. A file whose bytes are
     unchanged is skipped. Embedding runs here, since this is already a background job."""

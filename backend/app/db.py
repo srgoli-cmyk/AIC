@@ -344,7 +344,7 @@ def _ensure_local_user(session: Session, user_id: str) -> None:
     )
 
 
-def save_sync(payload: SyncPayload, *, user_id: str = LOCAL_USER_ID) -> tuple[str, int]:
+def save_sync(payload: SyncPayload, *, user_id: str) -> tuple[str, int]:
     """Upsert the course, its lectures and its files in ONE transaction for `user_id`. Returns
     the course_id and the number of distinct lectures skipped because they belong to another
     course of the same student.
@@ -498,7 +498,7 @@ def save_sync(payload: SyncPayload, *, user_id: str = LOCAL_USER_ID) -> tuple[st
     return cid, skipped
 
 
-def list_courses(*, user_id: str = LOCAL_USER_ID) -> list[CourseSummary]:
+def list_courses(*, user_id: str) -> list[CourseSummary]:
     ensure_schema()
     stmt = (
         select(
@@ -524,7 +524,7 @@ def list_courses(*, user_id: str = LOCAL_USER_ID) -> list[CourseSummary]:
     ]
 
 
-def list_lecture_statuses(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[LectureStatus]:
+def list_lecture_statuses(course_id: str, *, user_id: str) -> list[LectureStatus]:
     """Each stored lecture of the course with whether it has captions, ordered by entry_id. The
     caption text itself is never loaded: Postgres computes the flag."""
     ensure_schema()
@@ -538,7 +538,7 @@ def list_lecture_statuses(course_id: str, *, user_id: str = LOCAL_USER_ID) -> li
         return [LectureStatus(entry_id=r[0], has_captions=r[1]) for r in session.execute(stmt)]
 
 
-def get_course(course_id: str, *, user_id: str = LOCAL_USER_ID) -> CourseDetail | None:
+def get_course(course_id: str, *, user_id: str) -> CourseDetail | None:
     """The course with its details and every stored lecture (no captions), or None. Lectures are
     ordered by number, then recording date, then entry_id; `indexed` is per lecture: its chunks
     were built from its current captions."""
@@ -600,7 +600,7 @@ def get_course(course_id: str, *, user_id: str = LOCAL_USER_ID) -> CourseDetail 
         )
 
 
-def course_exists(course_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
+def course_exists(course_id: str, *, user_id: str) -> bool:
     if "\x00" in course_id:
         return False  # cannot exist, and the driver refuses to send it; answered as not found
     ensure_schema()
@@ -614,7 +614,7 @@ def course_exists(course_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
 # --- ingestion ---
 
 
-def due_lecture_ids(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[str]:
+def due_lecture_ids(course_id: str, *, user_id: str) -> list[str]:
     """Lectures of the course whose chunks are missing or were built from other captions."""
     ensure_schema()
     with Session(engine) as session:
@@ -624,7 +624,7 @@ def due_lecture_ids(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[str
         return list(session.execute(stmt.order_by(Lecture.entry_id)).scalars())
 
 
-def lecture_captions(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> str | None:
+def lecture_captions(entry_id: str, *, user_id: str) -> str | None:
     with Session(engine) as session:
         stmt = select(Lecture.captions_srt).where(
             Lecture.user_id == user_id, Lecture.entry_id == entry_id
@@ -638,7 +638,7 @@ def replace_chunks(
     chunks: list[ChunkData],
     vectors: list[list[float]],
     *,
-    user_id: str = LOCAL_USER_ID,
+    user_id: str,
 ) -> bool:
     """Replace a lecture's chunks in one transaction. Returns False (and writes nothing) if the
     chunks are already current, or if the captions changed since they were read; in the second
@@ -681,7 +681,7 @@ def replace_chunks(
     return True
 
 
-def refresh_indexed(course_id: str, *, user_id: str = LOCAL_USER_ID) -> None:
+def refresh_indexed(course_id: str, *, user_id: str) -> None:
     """indexed = the course has lectures and none of them is due."""
     has_lectures = exists().where(
         Lecture.user_id == Course.user_id, Lecture.course_id == Course.course_id
@@ -735,7 +735,7 @@ def save_document(
     pages: int,
     chunks: list[tuple[int, str]],
     lecture_no: int | None = None,
-    user_id: str = LOCAL_USER_ID,
+    user_id: str,
 ) -> None:
     """Store a document and replace its chunks (without embeddings) in one transaction. A
     doc_id that belongs to another course of the same student is refused with ValueRejected."""
@@ -779,7 +779,7 @@ def save_document(
         raise ValueRejected from None
 
 
-def delete_document(course_id: str, doc_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
+def delete_document(course_id: str, doc_id: str, *, user_id: str) -> bool:
     """Remove one of the course's documents and its chunks. False if the course has no such
     document (another course's document is never touched)."""
     ensure_schema()
@@ -795,7 +795,7 @@ def delete_document(course_id: str, doc_id: str, *, user_id: str = LOCAL_USER_ID
 
 
 def course_facts(
-    course_id: str, *, user_id: str = LOCAL_USER_ID
+    course_id: str, *, user_id: str
 ) -> tuple[str, str, str | None, list[str], list[date]] | None:
     """(code, name, term, instructors, lecture dates) of a synced course, or None."""
     if "\x00" in course_id:
@@ -831,16 +831,14 @@ def _site_info(site: CourseSite) -> SiteInfo:
     )
 
 
-def get_site(course_id: str, *, user_id: str = LOCAL_USER_ID) -> SiteInfo | None:
+def get_site(course_id: str, *, user_id: str) -> SiteInfo | None:
     ensure_schema()
     with Session(engine) as session:
         site = session.get(CourseSite, (user_id, course_id))
         return _site_info(site) if site else None
 
 
-def set_site(
-    course_id: str, url: str, title: str, chosen_by: str, *, user_id: str = LOCAL_USER_ID
-) -> SiteInfo:
+def set_site(course_id: str, url: str, title: str, chosen_by: str, *, user_id: str) -> SiteInfo:
     """Record the course's website (status "syncing", counts reset). Choosing another site
     removes the documents that came from the old one."""
     ensure_schema()
@@ -870,7 +868,7 @@ def update_site(
     status: str,
     counts: dict[str, int],
     *,
-    user_id: str = LOCAL_USER_ID,
+    user_id: str,
 ) -> bool:
     """Progress of a site sync. Ignored, and False, if the course has since moved to another
     site or forgotten this one."""
@@ -889,7 +887,7 @@ def update_site(
         )
 
 
-def delete_site(course_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
+def delete_site(course_id: str, *, user_id: str) -> bool:
     """Forget the course's website and the documents that came from it."""
     ensure_schema()
     with Session(engine) as session, session.begin():
@@ -909,9 +907,7 @@ def delete_site(course_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
         )
 
 
-def delete_web_documents_except(
-    course_id: str, keep: set[str], *, user_id: str = LOCAL_USER_ID
-) -> int:
+def delete_web_documents_except(course_id: str, keep: set[str], *, user_id: str) -> int:
     """Remove web documents of the course that the site no longer posts."""
     ensure_schema()
     with Session(engine) as session, session.begin():
@@ -943,7 +939,7 @@ def rename_documents(tidy: Callable[[str], str]) -> int:
         return changed
 
 
-def list_documents(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[DocumentInfo]:
+def list_documents(course_id: str, *, user_id: str) -> list[DocumentInfo]:
     """The course's documents, by name. `indexed` is true when every chunk has its embedding."""
     ensure_schema()
     pending = (
@@ -974,9 +970,7 @@ def list_documents(course_id: str, *, user_id: str = LOCAL_USER_ID) -> list[Docu
         ]
 
 
-def doc_chunks_without_embedding(
-    doc_id: str, limit: int, *, user_id: str = LOCAL_USER_ID
-) -> list[tuple[int, str]]:
+def doc_chunks_without_embedding(doc_id: str, limit: int, *, user_id: str) -> list[tuple[int, str]]:
     stmt = (
         select(DocChunk.id, DocChunk.text)
         .where(
@@ -1000,7 +994,7 @@ def set_doc_embeddings(rows: list[tuple[int, list[float]]]) -> None:
 
 
 def search_doc_chunks(
-    course_id: str, query_vector: list[float], limit: int, *, user_id: str = LOCAL_USER_ID
+    course_id: str, query_vector: list[float], limit: int, *, user_id: str
 ) -> list[ChunkHit]:
     """The `limit` document chunks of one course closest to the vector, closest first. An exact
     scan: a course has a few thousand slide chunks at most, far fewer than caption chunks."""
@@ -1036,7 +1030,7 @@ def search_doc_chunks(
     ]
 
 
-def lecture_chunks(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> list[ChunkHit]:
+def lecture_chunks(entry_id: str, *, user_id: str) -> list[ChunkHit]:
     """Every chunk of one lecture, in the order it was said. For the study tools, which read a
     whole lecture instead of searching it; `distance` is 0 because nothing was searched."""
     ensure_schema()
@@ -1058,7 +1052,7 @@ def lecture_chunks(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> list[Chunk
         return [ChunkHit(*row, 0.0) for row in session.execute(stmt).all()]
 
 
-def lecture_course(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> str | None:
+def lecture_course(entry_id: str, *, user_id: str) -> str | None:
     ensure_schema()
     with Session(engine) as session:
         lecture = session.get(Lecture, (user_id, entry_id))
@@ -1066,7 +1060,7 @@ def lecture_course(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> str | None
 
 
 def course_pages(
-    course_id: str, limit: int = 6_001, *, user_id: str = LOCAL_USER_ID
+    course_id: str, limit: int = 6_001, *, user_id: str
 ) -> list[tuple[str, str, str, int, str]]:
     """Every document chunk of a course as (doc_id, name, url, page, text), page by page."""
     ensure_schema()
@@ -1084,7 +1078,7 @@ def course_pages(
         return [tuple(row) for row in session.execute(stmt).all()]
 
 
-def lecture_exists(entry_id: str, *, user_id: str = LOCAL_USER_ID) -> bool:
+def lecture_exists(entry_id: str, *, user_id: str) -> bool:
     ensure_schema()
     with Session(engine) as session:
         return session.get(Lecture, (user_id, entry_id)) is not None
@@ -1107,7 +1101,7 @@ def _search_statement(
     limit: int,
     entry_id: str | None = None,
     *,
-    user_id: str = LOCAL_USER_ID,
+    user_id: str,
 ):
     distance = Chunk.embedding.cosine_distance(query_vector).label("distance")
     return (
@@ -1144,7 +1138,7 @@ def search_chunks(
     limit: int,
     entry_id: str | None = None,
     *,
-    user_id: str = LOCAL_USER_ID,
+    user_id: str,
 ) -> list[ChunkHit]:
     """The `limit` chunks of one course closest to the vector (cosine), closest first. With
     `entry_id`, only that lecture's chunks."""

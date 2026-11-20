@@ -2,6 +2,7 @@ import "./look.js";
 import * as api from "./api.js";
 import { coverageNote, day, duration, lectureSections, prettyCode, prettyName, schedule, sectionsOf, termRange, topic } from "./course.js";
 import { $, el } from "./dom.js";
+import { loginErrorText } from "./loginerrors.js";
 import { answerHtml, renderMath, safeUrl, slidesLinkText, sourceLabel, sourceUrl, streamingHtml } from "./render.js";
 import { hideStudy, showStudy, STUDY } from "./study.js";
 import { hideSlidesPanel, showSlidesPanel } from "./site.js";
@@ -60,6 +61,15 @@ function updateUserHeader(user) {
   $("user-email").textContent = user.email;
 }
 
+// Any call that answers 401 means the session ended: stop and show the sign-in screen.
+api.onSignedOut(() => {
+  if (!state.user) return;
+  state.user = null;
+  state.stop?.abort();
+  updateUserHeader(null);
+  renderLogin("expired");
+});
+
 // Render sign-in landing screen for unauthenticated users
 function renderLogin(errorKey) {
   document.title = "Sign In · Lecture Search";
@@ -67,14 +77,7 @@ function renderLogin(errorKey) {
   $("login-btn").href = api.loginUrl();
   const errorBox = $("login-error");
   if (errorKey) {
-    const messages = {
-      ucsd_only: "Access restricted: Only verified @ucsd.edu Google accounts are permitted. Please sign in with your official UCSD student or faculty email.",
-      unverified_email: "Your Google account email is not verified. Please verify your UCSD email with Google before signing in.",
-      google_failed: "Google authentication failed or was cancelled. Please try again.",
-      auth_cancelled: "Sign in was cancelled. Please try again.",
-      expired: "Your session has expired. Please sign in again.",
-    };
-    errorBox.textContent = messages[errorKey] || "Sign in failed. Please try again.";
+    errorBox.textContent = loginErrorText(errorKey);
     errorBox.hidden = false;
   } else {
     errorBox.hidden = true;

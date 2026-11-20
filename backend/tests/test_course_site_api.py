@@ -34,7 +34,7 @@ def course(monkeypatch):
     monkeypatch.setattr(app_main, "settings", key)
     synced = []
 
-    def fake_sync(course_id, url, progress=None):
+    def fake_sync(course_id, url, progress=None, *, user_id):
         out = cs.SiteSync(found=3, stored=2, unreadable=1)
         if progress:
             progress(out)
@@ -49,6 +49,7 @@ def course(monkeypatch):
             pages=1,
             chunks=[(1, "Arrays hold values of one type.")],
             lecture_no=1,
+            user_id=user_id,
         )
         synced.append(url)
         return out
@@ -115,6 +116,7 @@ def test_forgetting_the_site_removes_what_came_from_it_but_not_canvas_files(cour
         content_hash="h",
         pages=1,
         chunks=[(1, "Canvas page text here.")],
+        user_id=db.LOCAL_USER_ID,
     )
     assert client.delete(f"/courses/{CID}/site").status_code == 204
     assert [d["doc_id"] for d in client.get(f"/courses/{CID}/documents").json()] == [
@@ -146,9 +148,15 @@ def test_course_facts_come_from_the_synced_course(monkeypatch):
     monkeypatch.setattr(
         db,
         "course_facts",
-        lambda cid: ("DSC010_FA26_001", "DSC 10", "Fall 2026", ["Peter Chi"], [date(2026, 9, 25)]),
+        lambda cid, *, user_id: (
+            "DSC010_FA26_001",
+            "DSC 10",
+            "Fall 2026",
+            ["Peter Chi"],
+            [date(2026, 9, 25)],
+        ),
     )
-    f = cs.facts_for(CID)
+    f = cs.facts_for(CID, user_id=db.LOCAL_USER_ID)
     assert f.subject_number == ("DSC", "10") and f.surnames == ("Chi",)
     assert f.lecture_dates == (date(2026, 9, 25),)
 
@@ -162,18 +170,20 @@ def test_other_web_pages_cannot_start_a_search_or_delete(course, monkeypatch):
     assert client.delete(f"/courses/{CID}/site", headers=evil).status_code == 403
     assert client.delete(f"/courses/{CID}/documents/canvas/7", headers=evil).status_code == 403
     assert calls == []
-    ext = {"Origin": "chrome-extension://" + "a" * 32}
-    assert client.post(f"/courses/{CID}/site/search", headers=ext).status_code == 200
-    local = {"Origin": "http://localhost:8000"}
-    assert client.post(f"/courses/{CID}/site/search", headers=local).status_code == 200
+    # Another localhost port is another origin; the backend's own (the page at /app/) is fine.
+    # An extension with a Bearer token is covered in test_origin.py.
+    other_port = {"Origin": "http://localhost:3000"}
+    assert client.post(f"/courses/{CID}/site/search", headers=other_port).status_code == 403
+    own = {"Origin": "http://testserver"}
+    assert client.post(f"/courses/{CID}/site/search", headers=own).status_code == 200
 
 
 @pytest.mark.integration
 def test_a_sync_stops_when_the_site_is_forgotten_and_leaves_nothing(course, monkeypatch):
     monkeypatch.setattr(cs, "check_site", lambda facts, url: verdict(url, cs.ACCEPT))
 
-    def forgotten_midway(course_id, url, progress=None):
-        db.delete_site(course_id)
+    def forgotten_midway(course_id, url, progress=None, *, user_id):
+        db.delete_site(course_id, user_id=user_id)
         db.save_document(
             course_id,
             cs.doc_id_for(url + "late.pdf"),
@@ -184,6 +194,7 @@ def test_a_sync_stops_when_the_site_is_forgotten_and_leaves_nothing(course, monk
             content_hash="h",
             pages=1,
             chunks=[(1, "Stored just after the forget.")],
+            user_id=user_id,
         )
         progress(cs.SiteSync(found=1))
         raise AssertionError("progress should have stopped the sync")
@@ -199,10 +210,11 @@ def test_a_site_chosen_during_a_sync_is_read_after_it(course, monkeypatch):
     monkeypatch.setattr(cs, "check_site", lambda facts, url: verdict(url, cs.ACCEPT))
     read = []
 
-    def switch_midway(course_id, url, progress=None):
+    def switch_midway(course_id, url, progress=None, *, user_id):
         read.append(url)
         if url == SITE:
-            db.set_site(course_id, OLD, "Old", "student")  # the student picks another meanwhile
+            # the student picks another meanwhile
+            db.set_site(course_id, OLD, "Old", "student", user_id=user_id)
             db.save_document(  # a file the old sync stored just after the switch
                 course_id,
                 cs.doc_id_for(url + "late.pdf"),
@@ -213,6 +225,7 @@ def test_a_site_chosen_during_a_sync_is_read_after_it(course, monkeypatch):
                 content_hash="h",
                 pages=1,
                 chunks=[(1, "Stored just after the switch.")],
+                user_id=user_id,
             )
         progress(cs.SiteSync(found=1))
         return cs.SiteSync(found=1, stored=1)

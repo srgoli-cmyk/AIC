@@ -3,6 +3,7 @@
   "name": "Lecture Sync (dev)",
   "version": "0.0.1",
   "description": "Syncs lecture captions and slides from Canvas to the local AI Lecture Search backend.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtPnZdCIPgXRO2y46AYsaHJ0imwoeMYUf7+312oqHO/0QhzylrwajJnxYDVmCI1S9Zql6Y7LR00t0AJVS6kwpsBZPLnAh883mPV2WAxcbEM/a2ZKdncI/b3UFT7h1bGlAAOuSl+UZ6wEvHtxNyFbcmNIzSeCQMljuOZcSmwDT6LElthcpExoKPFIEP59WzBof7HzRyLIdODSgek2Z75zsNmxMmdmBhgtZa396dluuYJu9aMxH+qiEHhEdEb1DfA6A0G0VzLGXefrX/lIQQp80s+nctId3396MZuhDuP+pr1gH3yse2YyAzzK+FsuOcQ37uHAtAXZJVXwTPFuLXm3vbQIDAQAB",
   "action": {
     "default_title": "Lecture Sync",
     "default_popup": "popup.html"

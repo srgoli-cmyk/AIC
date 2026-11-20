@@ -37,7 +37,7 @@ def test_create_session_validates_kind_and_ttl():
 
 def test_create_extension_code_validates_ttl():
     with pytest.raises(ValueError, match="ttl_seconds"):
-        auth_db.create_extension_code("usr_1", ttl_seconds=0)
+        auth_db.create_extension_code("usr_1", "c" * 43, ttl_seconds=0)
 
 
 def test_empty_and_nul_inputs_short_circuit_without_db(monkeypatch):
@@ -49,7 +49,7 @@ def test_empty_and_nul_inputs_short_circuit_without_db(monkeypatch):
         assert auth_db.get_user(bad) is None
         assert auth_db.get_user_by_session_token(bad) is None
         assert auth_db.revoke_session(bad) is False
-        assert auth_db.consume_extension_code(bad) is None
+        assert auth_db.consume_extension_code(bad, "nonce") is None
 
 
 def test_course_tables_use_user_scoped_composite_primary_keys():
@@ -82,6 +82,68 @@ def test_upsert_user_creates_and_updates_by_google_sub():
     assert second.email == "ada.l@ucsd.edu"
     assert second.name == "Ada Byron"
     assert auth_db.get_user(first.id) == second
+
+
+def _users() -> list[tuple]:
+    with Session(db.engine) as session:
+        rows = session.execute(
+            select(
+                auth_db.User.id,
+                auth_db.User.google_sub,
+                auth_db.User.email,
+                auth_db.User.name,
+                auth_db.User.last_login_at,
+            ).order_by(auth_db.User.id)
+        ).all()
+    return [tuple(r) for r in rows]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("email", "make_owner"),
+    [
+        ("taken@ucsd.edu", lambda: auth_db.upsert_user("old-sub", "taken@ucsd.edu", "Old")),
+        # The usr_local seed, which the test setup (and a real database) already has.
+        ("local@ucsd.edu", lambda: None),
+        # What `python -m app.dev_session` makes: a user with a placeholder sub.
+        ("taken@ucsd.edu", lambda: auth_db.create_local_session("taken@ucsd.edu")),
+    ],
+    ids=["recycled", "usr_local", "local-cli"],
+)
+def test_a_new_sub_with_an_email_that_belongs_to_another_user_is_refused(email, make_owner):
+    make_owner()
+    before = _users()
+    assert any(row[2] == email for row in before)
+    with pytest.raises(auth_db.EmailInUse) as caught:
+        auth_db.upsert_user("brand-new-sub", email.upper(), "New Person")
+    assert email not in repr(caught.value) and not str(caught.value)
+    # Nothing was created or changed: not the other user, not a login time, no new row.
+    assert _users() == before
+    assert all(row[1] != "brand-new-sub" for row in before)
+
+
+@pytest.mark.integration
+def test_a_known_sub_that_now_reports_another_users_email_is_refused_and_unchanged():
+    auth_db.upsert_user("sub-first", "first@ucsd.edu", "First")
+    second = auth_db.upsert_user("sub-second", "second@ucsd.edu", "Second")
+    before = _users()
+    with pytest.raises(auth_db.EmailInUse):
+        auth_db.upsert_user("sub-second", "first@ucsd.edu", "Second Renamed")
+    assert _users() == before
+    assert auth_db.get_user(second.id) == second
+
+
+@pytest.mark.integration
+def test_a_local_cli_placeholder_is_not_adopted_by_a_real_login():
+    token, _ = auth_db.create_local_session("placeholder@ucsd.edu")
+    placeholder = auth_db.get_user_by_session_token(token)
+    assert placeholder is not None
+    with pytest.raises(auth_db.EmailInUse):
+        auth_db.upsert_user("real-google-sub", "placeholder@ucsd.edu", "Real Person")
+    # The placeholder keeps its sub and its session; the real person got no account.
+    assert auth_db.get_user_by_session_token(token) == placeholder
+    owner = [r for r in _users() if r[2] == "placeholder@ucsd.edu"]
+    assert len(owner) == 1 and owner[0][1].startswith("local-cli:")
 
 
 @pytest.mark.integration
@@ -125,21 +187,27 @@ def test_session_stores_only_hash_and_respects_kind_expiry_and_revocation():
 @pytest.mark.integration
 def test_extension_exchange_code_is_single_use_and_expires():
     user = auth_db.upsert_user("google-sub-3", "ext@ucsd.edu", "Ext Student")
-    code = auth_db.create_extension_code(user.id, ttl_seconds=60)
+    challenge = auth_db.nonce_challenge("raw-nonce")
+    code = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
 
     # First exchange succeeds; replay with the same code fails.
-    assert auth_db.consume_extension_code(code) == user
-    assert auth_db.consume_extension_code(code) is None
+    assert auth_db.consume_extension_code(code, "raw-nonce") == user
+    assert auth_db.consume_extension_code(code, "raw-nonce") is None
 
     # Expired code cannot be consumed.
-    expired_code = auth_db.create_extension_code(user.id, ttl_seconds=60)
+    expired_code = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
     with Session(db.engine) as session, session.begin():
         session.execute(
             update(auth_db.AuthExchangeCode)
             .where(auth_db.AuthExchangeCode.code_hash == auth_db.hash_token(expired_code))
             .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
         )
-    assert auth_db.consume_extension_code(expired_code) is None
+    assert auth_db.consume_extension_code(expired_code, "raw-nonce") is None
+
+    # A wrong nonce fails and burns the code, so the right nonce afterwards fails too.
+    burnt = auth_db.create_extension_code(user.id, challenge, ttl_seconds=60)
+    assert auth_db.consume_extension_code(burnt, "other-nonce") is None
+    assert auth_db.consume_extension_code(burnt, "raw-nonce") is None
 
 
 @pytest.mark.integration

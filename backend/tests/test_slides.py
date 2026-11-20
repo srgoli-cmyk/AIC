@@ -232,7 +232,7 @@ def test_an_uploaded_pdf_is_stored_embedded_and_listed(course):
         "lecture_no": None,
         "indexed": True,
     }
-    hits = db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5)
+    hits = db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5, user_id=db.LOCAL_USER_ID)
     assert hits[0].text == RULE and hits[0].page == 1 and hits[0].distance < 1e-6
     assert hits[0].entry_id == "canvas-file-7" and hits[0].lecture_title == "Week 3"
 
@@ -244,7 +244,8 @@ def test_uploading_again_replaces_the_pages(course):
     assert r.json()["pages"] == 1
     (doc,) = client.get(f"/courses/{CID}/documents").json()
     assert (doc["pages"], doc["version"]) == (1, "900:2026-10-09T00:00:00Z")
-    assert [h.text for h in db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5)] == [CHAIN]
+    hits = db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5, user_id=db.LOCAL_USER_ID)
+    assert [h.text for h in hits] == [CHAIN]
 
 
 @pytest.mark.integration
@@ -294,7 +295,7 @@ def test_an_older_copy_can_be_removed_but_not_another_courses(course):
     assert client.delete("/courses/canvas-888888/documents/canvas/7").status_code == 404
     assert client.delete(f"/courses/{CID}/documents/canvas/7").status_code == 204
     assert client.get(f"/courses/{CID}/documents").json() == []
-    assert db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5) == []
+    assert db.search_doc_chunks(CID, embeddings.embed([RULE])[0], 5, user_id=db.LOCAL_USER_ID) == []
     assert client.delete(f"/courses/{CID}/documents/canvas/7").status_code == 404
     assert client.delete(f"/courses/{CID}/documents/canvas/0").status_code == 422
 
@@ -340,13 +341,15 @@ def test_asking_about_one_lecture_leaves_slides_out(course, monkeypatch):
 
 
 def test_embedding_failures_never_raise(monkeypatch):
-    monkeypatch.setattr(db, "doc_chunks_without_embedding", lambda doc_id, limit: [(1, "t")])
+    monkeypatch.setattr(
+        db, "doc_chunks_without_embedding", lambda doc_id, limit, *, user_id: [(1, "t")]
+    )
 
     def boom(texts):
         raise embeddings.ModelLoadError("ImportError")
 
     monkeypatch.setattr(embeddings, "embed", boom)
-    slides.embed_document("canvas-file-7")
+    slides.embed_document("canvas-file-7", user_id=db.LOCAL_USER_ID)
 
 
 def test_page_text_cannot_write_its_own_citation_line():
@@ -383,6 +386,7 @@ def test_names_stored_before_the_rule_changed_are_tidied():
         content_hash="h",
         pages=1,
         chunks=[(1, "Some page text here.")],
+        user_id=db.LOCAL_USER_ID,
     )
     assert db.rename_documents(slides.display_name) == 1
     assert db.rename_documents(slides.display_name) == 0
@@ -456,7 +460,17 @@ def test_a_page_the_model_cannot_read_stays_empty(ocr, monkeypatch):
     monkeypatch.setattr(answer, "call_llm", failing)
     with pytest.raises(slides.UnreadableDocument):
         data = make_pdf([""])
-        slides.store(CID, "d", source="canvas", name="n", url="u", version="v", data=data, ocr=True)
+        slides.store(
+            CID,
+            "d",
+            source="canvas",
+            name="n",
+            url="u",
+            version="v",
+            data=data,
+            ocr=True,
+            user_id=db.LOCAL_USER_ID,
+        )
 
 
 def test_without_a_key_a_scanned_pdf_is_still_unreadable(monkeypatch):

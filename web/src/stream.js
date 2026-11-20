@@ -1,7 +1,7 @@
 // POST /ask/stream (contracts/api.md): Server-Sent Events with `delta`, then one `final` or `error`.
 // No DOM and no globals, so it runs under node tests: fetch is passed in.
 
-import { BackendError, Stopped, StreamUnavailable } from "./errors.js";
+import { BackendError, Stopped, StreamUnavailable, signedOut } from "./errors.js";
 
 // An event bigger than this is not something the backend sends.
 const MAX_BUFFER = 1_000_000;
@@ -118,6 +118,12 @@ export async function streamAnswer(fetchFn, url, body, { onDelta, signal } = {})
     // The backend's own errors are final: /ask would say the same. Anything else (no such route on an
     // older backend, a proxy page) means the stream itself is the problem.
     if (signal?.aborted) throw new Stopped("stopped");
+    if (res.status === 401) {
+      signedOut();
+      const err = new BackendError(typeof detail === "string" ? detail : "not authenticated");
+      err.status = 401;
+      throw err;
+    }
     const known = typeof detail === "string" && detail !== "Not Found" && detail !== "Method Not Allowed";
     if (known) throw new BackendError(detail);
     throw new StreamUnavailable(`status ${res.status}`);

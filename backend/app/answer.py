@@ -6,7 +6,6 @@ as an error type or an HTTP status only.
 """
 
 import asyncio
-import inspect
 import json
 import logging
 import math
@@ -519,24 +518,13 @@ def to_source(hit: db.ChunkHit) -> Source:
 # --- entry point ---
 
 
-def _call(fn, *args, **kwargs):
-    """Call fn passing kwargs only if accepted (supports test mocks with legacy signatures)."""
-    try:
-        sig = inspect.signature(fn)
-        if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-    except (ValueError, TypeError):
-        pass
-    return fn(*args, **kwargs)
-
-
 def prepare(
     course_id: str,
     question: str,
     top_k: int,
     entry_id: str | None = None,
     *,
-    user_id: str = db.LOCAL_USER_ID,
+    user_id: str,
 ) -> list[db.ChunkHit]:
     """Everything before the model call: key check, embed, search, slides, dedupe. Returns the
     passages to give the model (empty when nothing is indexed). Shared by /ask and /ask/stream.
@@ -551,15 +539,13 @@ def prepare(
     # Over-fetch: de-duplication removes rows, and the closest rows are often neighbours.
     limit = max(top_k * 4, 40)
     if entry_id is None:
-        hits = _call(db.search_chunks, course_id, query_vector, limit, user_id=user_id)
+        hits = db.search_chunks(course_id, query_vector, limit, user_id=user_id)
         # The course's slides are searched with its lectures; the closest of both are used.
-        slides = _call(db.search_doc_chunks, course_id, query_vector, limit, user_id=user_id)
+        slides = db.search_doc_chunks(course_id, query_vector, limit, user_id=user_id)
         if slides:
             hits = sorted([*hits, *slides], key=lambda h: h.distance)
     else:
-        hits = _call(
-            db.search_chunks, course_id, query_vector, limit, entry_id=entry_id, user_id=user_id
-        )
+        hits = db.search_chunks(course_id, query_vector, limit, entry_id=entry_id, user_id=user_id)
     return dedupe(hits, top_k) if hits else []
 
 
@@ -579,7 +565,7 @@ def answer_question(
     top_k: int,
     entry_id: str | None = None,
     *,
-    user_id: str = db.LOCAL_USER_ID,
+    user_id: str,
 ) -> AskResponse:
     """Raises AnswerNotConfigured, SearchUnavailable or AnswerUnavailable; main maps them."""
     given = prepare(course_id, question, top_k, entry_id, user_id=user_id)

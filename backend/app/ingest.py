@@ -18,7 +18,7 @@ class EmbeddingDimensionError(ValueError):
     """The embedder returned vectors that do not match the vector column."""
 
 
-def ingest_lecture(entry_id: str, *, user_id: str = db.LOCAL_USER_ID) -> None:
+def ingest_lecture(entry_id: str, *, user_id: str) -> None:
     captions = db.lecture_captions(entry_id, user_id=user_id)
     if captions is None:
         return
@@ -36,15 +36,10 @@ def ingest_lecture(entry_id: str, *, user_id: str = db.LOCAL_USER_ID) -> None:
     db.replace_chunks(entry_id, digest, chunks, vectors, user_id=user_id)
 
 
-def ingest_course(course_id: str, *, user_id: str = db.LOCAL_USER_ID) -> None:
+def ingest_course(course_id: str, *, user_id: str) -> None:
     """Chunk every lecture of the course that is due, then recompute `indexed`."""
     try:
-        due_ids = (
-            db.due_lecture_ids(course_id)
-            if user_id == db.LOCAL_USER_ID
-            else db.due_lecture_ids(course_id, user_id=user_id)
-        )
-        for entry_id in due_ids:
+        for entry_id in db.due_lecture_ids(course_id, user_id=user_id):
             try:
                 ingest_lecture(entry_id, user_id=user_id)
             except embeddings.ModelLoadError as exc:
@@ -53,9 +48,6 @@ def ingest_course(course_id: str, *, user_id: str = db.LOCAL_USER_ID) -> None:
                 break
             except Exception as exc:
                 log.error("ingestion of lecture %s failed: %s", entry_id, type(exc).__name__)
-        if user_id == db.LOCAL_USER_ID:
-            db.refresh_indexed(course_id)
-        else:
-            db.refresh_indexed(course_id, user_id=user_id)
+        db.refresh_indexed(course_id, user_id=user_id)
     except Exception as exc:
         log.error("ingestion of course %s failed: %s", course_id, type(exc).__name__)

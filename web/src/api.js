@@ -1,14 +1,14 @@
 // Calls to the FastAPI backend (contracts/api.md). Errors carry a message that is safe to show.
 import { DEMO_COURSES, demoAnswer, demoCourse, demoStudy } from "./demo.js";
-import { BackendError, Stopped, StreamUnavailable } from "./errors.js";
+import { BackendError, Stopped, StreamUnavailable, onSignedOut, signedOut } from "./errors.js";
+import { backendFor } from "./backendurl.js";
 import { streamAnswer } from "./stream.js";
 
-export { BackendError, Stopped, StreamUnavailable };
+export { BackendError, Stopped, StreamUnavailable, onSignedOut };
 
 const params = new URLSearchParams(location.search);
-// Served by the backend at /app/: same origin. Served on its own (`make web`): the default port.
-const sameOrigin = location.pathname.startsWith("/app/");
-export const BACKEND = (params.get("backend") || (sameOrigin ? location.origin : "http://localhost:8000")).replace(/\/$/, "");
+// Its own origin at /app/; ?backend= only for another local port (src/backendurl.js).
+export const BACKEND = backendFor(location, params);
 export let demo = params.has("demo");
 
 
@@ -52,6 +52,8 @@ async function call(path, init, timeoutMs) {
   if (!res.ok) {
     const err = new BackendError(typeof body?.detail === "string" ? body.detail : `The backend returned ${res.status}.`);
     err.status = res.status;
+    // /auth/me answers 401 for "not signed in yet", which start() handles itself.
+    if (res.status === 401 && path !== "/auth/me") signedOut();
     throw err;
   }
   return body;
