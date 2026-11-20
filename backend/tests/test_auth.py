@@ -17,14 +17,33 @@ from app.main import app
 client = TestClient(app)
 
 
+TEST_SESSION_SECRET = "test-session-secret-0123456789-abcdefghij"  # noqa: S105
+
+
 def _mock_settings(monkeypatch, **kwargs):
+    kwargs.setdefault("session_secret", TEST_SESSION_SECRET)
     new_settings = dataclasses.replace(settings, **kwargs)
     monkeypatch.setattr("app.auth.settings", new_settings)
     monkeypatch.setattr("app.config.settings", new_settings)
 
 
+@pytest.fixture(autouse=True)
+def _session_secret(monkeypatch):
+    # State cookies need a SESSION_SECRET; the test environment has none.
+    _mock_settings(monkeypatch)
+
+
 def _make_jwt(payload: dict) -> str:
-    """Helper creating a dummy unencrypted JWT string (`header.payload.sig`)."""
+    """Helper creating a dummy unencrypted JWT string (`header.payload.sig`). Fills in the
+    audience, issuer and time claims for the tests' client id unless the payload sets them."""
+    now = int(time.time())
+    defaults = {
+        "aud": "client-id",
+        "iss": "https://accounts.google.com",
+        "iat": now,
+        "exp": now + 3600,
+    }
+    payload = {**defaults, **payload}
     header = base64.urlsafe_b64encode(b'{"alg":"RS256","typ":"JWT"}').decode("ascii").rstrip("=")
     body = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
     sig = base64.urlsafe_b64encode(b"dummy-signature").decode("ascii").rstrip("=")

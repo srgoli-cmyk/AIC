@@ -47,6 +47,9 @@ class Settings:
     # Just getting everything from env file
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = field(default=os.getenv("GOOGLE_CLIENT_SECRET", ""), repr=False)
+    # Signs the OAuth state cookie. Must be at least 32 characters; there is no fallback, so login
+    # answers 503 until it is set. Generate one with `openssl rand -base64 48`.
+    session_secret: str = field(default=os.getenv("SESSION_SECRET", ""), repr=False)
     auth_redirect_uri: str = os.getenv(
         "AUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback"
     )

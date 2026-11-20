@@ -49,10 +49,21 @@ def generate_code_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
+MIN_SESSION_SECRET_LEN = 32
+CLOCK_SKEW_SECONDS = 60
+GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
+
+
+def session_secret_ok() -> bool:
+    """True when SESSION_SECRET is set and long enough to sign state cookies."""
+    return len(settings.session_secret) >= MIN_SESSION_SECRET_LEN
+
+
 def _state_secret() -> bytes:
-    # Use the Google client secret to sign state cookies; fall back to a fixed derivation if unset.
-    seed = settings.google_client_secret or "aic-auth-state-signing-seed"
-    return hashlib.sha256(seed.encode("utf-8")).digest()
+    # No fallback: an unset or short secret must never sign anything.
+    if not session_secret_ok():
+        raise RuntimeError("SESSION_SECRET missing or too short")
+    return settings.session_secret.encode("utf-8")
 
 
 def sign_oauth_state(payload: dict) -> str:
@@ -66,7 +77,7 @@ def sign_oauth_state(payload: dict) -> str:
 
 def verify_oauth_state(token: str) -> dict | None:
     """Verify state cookie signature and age (<= 10 min). Returns payload dict or None."""
-    if not token or "." not in token:
+    if not token or "." not in token or not session_secret_ok():
         return None
     b64_data, b64_sig = token.split(".", 1)
     try:
@@ -103,6 +114,77 @@ def decode_jwt_payload(id_token: str) -> dict:
     if not isinstance(claims, dict):
         raise ValueError("ID token payload must be a JSON object")
     return claims
+
+
+def _is_number(value: object) -> bool:
+    # bool is a subclass of int; a JSON `true` must not pass as a timestamp.
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def normalize_email(value: object) -> str | None:
+    """Casefolded email, or None unless it is plain ASCII with exactly one `@` and non-empty
+    local and domain parts."""
+    if not isinstance(value, str):
+        return None
+    # Check ASCII before folding: casefold turns some non-ASCII characters (Kelvin sign) into ASCII.
+    stripped = value.strip()
+    if not stripped.isascii():
+        return None
+    email = stripped.casefold()
+    if not email or email.count("@") != 1:
+        return None
+    local, domain = email.split("@")
+    if not local or not domain:
+        return None
+    return email
+
+
+def check_id_token_claims(
+    claims: dict, *, client_id: str, allowed_domain: str, now: float
+) -> tuple[str | None, str | None]:
+    """Pure check of the ID token claims. Returns `(reason, email)`.
+
+    `reason` is None when the login is allowed (then `email` is the normalized address), else a
+    fixed word safe to log: `claims` (token not meant for us, expired, or malformed email),
+    `unverified` or `domain`. Callers map `claims` to login_failed and the others to ucsd_only."""
+    if not client_id:
+        return "claims", None
+
+    # aud: a string, or a list that holds our client id with azp naming us too (OIDC Core 3.1.3.7).
+    aud = claims.get("aud")
+    if isinstance(aud, str):
+        if aud != client_id:
+            return "claims", None
+    elif isinstance(aud, list):
+        if client_id not in aud or claims.get("azp") != client_id:
+            return "claims", None
+    else:
+        return "claims", None
+
+    if claims.get("iss") not in GOOGLE_ISSUERS:
+        return "claims", None
+
+    exp, iat = claims.get("exp"), claims.get("iat")
+    if not _is_number(exp) or not _is_number(iat):
+        return "claims", None
+    if exp + CLOCK_SKEW_SECONDS <= now:  # expired, allowing some clock skew
+        return "claims", None
+    if iat - CLOCK_SKEW_SECONDS > now:  # issued in the future beyond the skew
+        return "claims", None
+
+    email = normalize_email(claims.get("email"))
+    if email is None:
+        return "claims", None
+    if claims.get("email_verified") is not True:
+        return "unverified", None
+
+    domain = allowed_domain.strip().casefold()
+    hd = claims.get("hd")
+    if not isinstance(hd, str) or hd.strip().casefold() != domain:
+        return "domain", None
+    if not email.endswith(f"@{domain}"):
+        return "domain", None
+    return None, email
 
 
 # --- Request user extraction ---
@@ -148,6 +230,11 @@ def require_user(request: Request) -> auth_db.UserRecord:
 def google_login(client: str = Query(default="web", pattern=r"^(web|extension)$")):
     """Redirect to Google's OAuth 2.0 authorization endpoint with PKCE and hd=ucsd.edu."""
     if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(status_code=503, detail="auth service not configured")
+    if not session_secret_ok():
+        log.warning(
+            "SESSION_SECRET is missing or shorter than %d characters", MIN_SESSION_SECRET_LEN
+        )
         raise HTTPException(status_code=503, detail="auth service not configured")
 
     state_nonce = secrets.token_urlsafe(16)
@@ -209,7 +296,8 @@ async def google_callback(
     client_type = stored_state.get("client", "web") if stored_state else "web"
 
     if error or not stored_state or not state or state != stored_state.get("state"):
-        log.warning("oauth callback state mismatch or error from Google: %s", error or "bad_state")
+        # Fixed reason only: `error` is a query parameter anyone can set.
+        log.warning("oauth callback rejected: %s", "google_error" if error else "bad_state")
         return _error_redirect(client_type, "login_failed")
 
     code_verifier = stored_state.get("verifier", "")
@@ -242,14 +330,16 @@ async def google_callback(
         return _error_redirect(client_type, "login_failed")
 
     # Strictly enforce @ucsd.edu domain and verification claims on the server
-    email = str(claims.get("email", "")).strip().lower()
-    email_verified = claims.get("email_verified") is True
-    hd_claim = str(claims.get("hd", "")).strip().lower()
-    allowed_domain = settings.allowed_email_domain.lower()
-
-    if not email_verified or hd_claim != allowed_domain or not email.endswith(f"@{allowed_domain}"):
-        log.info("rejected non-ucsd or unverified login: email=%s hd=%s", email, hd_claim)
-        return _error_redirect(client_type, "ucsd_only")
+    reason, email = check_id_token_claims(
+        claims,
+        client_id=settings.google_client_id,
+        allowed_domain=settings.allowed_email_domain,
+        now=time.time(),
+    )
+    if reason is not None or email is None:
+        # Fixed reason only: never log the email or hd.
+        log.info("rejected login: reason=%s", reason)
+        return _error_redirect(client_type, "login_failed" if reason == "claims" else "ucsd_only")
 
     google_sub = str(claims.get("sub", "")).strip()
     if not google_sub:

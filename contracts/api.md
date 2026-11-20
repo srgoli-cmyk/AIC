@@ -23,10 +23,10 @@ Student data (courses, lectures, documents, chunks) is private per student.
 ### GET /auth/google/login
 Query parameter: `client` is `"web"` (default) or `"extension"`.
 Redirects (`302`) to Google's OAuth 2.0 authorization URL using PKCE, an anti-CSRF `state` cookie/record, and `hd=ucsd.edu`.
-`503 {"detail": "auth service not configured"}` when `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` is unset.
+`503 {"detail": "auth service not configured"}` when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` or `SESSION_SECRET` is unset, or `SESSION_SECRET` is shorter than 32 characters.
 
 ### GET /auth/google/callback
-Handles Google's OAuth redirect (`code`, `state`). Exchanges `code` with Google and verifies the ID token's signature, audience, `email_verified == true`, `hd == "ucsd.edu"`, and `@ucsd.edu` email suffix on the server.
+Handles Google's OAuth redirect (`code`, `state`). Exchanges `code` with Google's token endpoint over TLS (OpenID Connect Core 3.1.3.7: the ID token comes straight from Google, so its claims are checked instead of its signature). The callback rejects the token with `auth_error=login_failed` unless `aud` is this app's client id (if `aud` is a list it must contain the client id and `azp` must equal it), `iss` is `https://accounts.google.com` or `accounts.google.com`, `exp` is in the future and `iat` is not in the future (both with 60 s of clock skew allowed), and `email` is plain ASCII with exactly one `@`. A valid token is rejected with `auth_error=ucsd_only` unless `email_verified == true`, `hd == "ucsd.edu"` and the email ends in `@ucsd.edu` (the domain is `ALLOWED_EMAIL_DOMAIN`). Rejected logins are logged with a fixed reason only, never the email or domain.
 - On invalid `state` or Google error: redirects `302` to `/app/?auth_error=login_failed` (or `/auth/extension/done?error=login_failed` for `client=extension`).
 - On non-`@ucsd.edu` or unverified account: redirects `302` to `/app/?auth_error=ucsd_only` (or `/auth/extension/done?error=ucsd_only` for `client=extension`).
 - On success (`client=web`): upserts the student, creates a web session, sets `aic_session`, and redirects `302` to `/app/`.
@@ -231,7 +231,7 @@ A reply from the model that cannot be read is asked for once more before the req
 All errors use FastAPI's default shape: `{"detail": ...}`.
 - `401 {"detail": "not authenticated"}`: missing, invalid, or expired session cookie or bearer token.
 - `403 {"detail": "ucsd.edu account required"}`: Google account is not a verified `@ucsd.edu` Google Workspace account.
-- `503 {"detail": "auth service not configured"}`: `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` is not set.
+- `503 {"detail": "auth service not configured"}`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` or `SESSION_SECRET` is not set, or `SESSION_SECRET` is shorter than 32 characters.
 - `503 {"detail": "database unavailable"}`: the database cannot be reached.
 - `503 {"detail": "answer service not configured"}`: no API key is set for `/ask`.
 - `503 {"detail": "search service unavailable"}`: the embedding model could not be loaded for `/ask`.
