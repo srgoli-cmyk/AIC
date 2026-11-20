@@ -13,6 +13,9 @@ MAIN_URL, TEST_URL = dbtools.resolve_urls()
 os.environ["DATABASE_URL"] = TEST_URL  # must happen before any `import app...`
 # An existing variable (even an empty one) wins over .env, so no real key is ever loaded in tests.
 os.environ["OPENROUTER_API_KEY"] = ""
+# TestClient sends `Host: testserver`; allow it in tests only. The production default
+# (localhost, 127.0.0.1) is checked in test_config_defaults.py and test_trusted_host.py.
+os.environ["ALLOWED_HOSTS"] = "localhost,127.0.0.1,testserver"
 # Cap libpq connection timeout in tests so unreachable mock hosts (127.0.0.1:1) fail fast on Windows
 os.environ.setdefault("PGCONNECT_TIMEOUT", "2")
 

@@ -92,6 +92,7 @@ One OAuth client serves the whole team. Whoever looks after it:
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | The team's Google sign-in client. Without them, sign-in answers 503 |
 | `SESSION_SECRET` | Signs the sign-in state; at least 32 random characters (`openssl rand -base64 48`) |
 | `EXTENSION_ID` | The only extension allowed to call the backend from its own origin (default `gdgflcpoijokbdnckcojphfoinhkbbmd`, the id the manifest key gives) |
+| `ALLOWED_HOSTS` | Host names the backend answers to (default `localhost,127.0.0.1`); any other `Host` gets 400 |
 | `OPENROUTER_OCR_MODEL` | Vision model that reads scanned PDFs, page images to text and LaTeX (default `google/gemini-3.5-flash`). Only used for Canvas PDFs that have almost no text |
 
 ## Working on it

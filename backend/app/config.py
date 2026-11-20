@@ -43,6 +43,12 @@ class Settings:
     # The one browser extension allowed to call us cross-origin (CORS), by its Chrome id: 32
     # letters a-p. The default is the stable id that the manifest key gives. CORS_ORIGIN_REGEX
     # is gone: a regex could be widened to web pages, and the page is served same-origin.
+    # Host names this backend answers to, comma separated (the port is ignored). Any other Host
+    # header gets 400 before anything else runs, which stops DNS rebinding: a page on
+    # evil.example whose name resolves to 127.0.0.1 would otherwise look "same origin" to the
+    # Origin check, because that check trusts the Host header. Keep the default for local use;
+    # add the real host name only when the backend is served under one.
+    allowed_hosts: str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
     extension_id: str = os.getenv("EXTENSION_ID", "gdgflcpoijokbdnckcojphfoinhkbbmd")
     # Google OAuth 2.0 (Sign in with UCSD Google). Both id and secret must be set for auth login.
     # Just getting everything from env file
@@ -61,6 +67,14 @@ class Settings:
 
 
 settings = Settings()
+
+
+def allowed_host_list(value: str) -> list[str]:
+    """The ALLOWED_HOSTS setting as a list: split on commas, trimmed, empty entries dropped. A "*"
+    entry is ignored, since it would switch the protection off. An empty result would refuse every
+    request, which is the safe way to fail."""
+    return [h for h in (part.strip() for part in value.split(",")) if h and h != "*"]
+
 
 EXTENSION_ID_RE = re.compile(r"[a-p]{32}")
 

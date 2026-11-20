@@ -1,5 +1,7 @@
 """Tests for the one-time claim of pre-login (usr_local) data by a real account."""
 
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -118,6 +120,34 @@ def test_claim_moves_everything(seeded):
     assert result["moved"] == EXPECTED
     assert _counts(LOCAL) == dict.fromkeys(TABLES, 0)
     assert _counts(seeded.id) == EXPECTED
+
+
+def test_claim_waits_for_a_chunk_write_in_flight(seeded):
+    """A chunk written for a usr_local lecture by an open transaction must not slip between the
+    claim's copy and its delete: the claim waits for that transaction, then moves the new chunk."""
+    result: dict = {}
+    with db.engine.connect() as writer:
+        trans = writer.begin()
+        writer.execute(
+            text(
+                "INSERT INTO chunks (user_id, entry_id, start_sec, end_sec, text, embedding)"
+                " VALUES (:u, '1_aaa', 90, 135, 'late chunk', CAST(:v AS vector))"
+            ),
+            {"u": LOCAL, "v": str(_vec(5))},
+        )
+        thread = threading.Thread(
+            target=lambda: result.update(auth_db.claim_local_data(seeded.email, dry_run=False))
+        )
+        thread.start()
+        thread.join(timeout=1.5)
+        assert thread.is_alive(), "the claim should be blocked by the in-flight chunk write"
+        trans.commit()
+    thread.join(timeout=15)
+    assert not thread.is_alive()
+
+    assert result["moved"]["chunks"] == EXPECTED["chunks"] + 1
+    assert _counts(LOCAL) == dict.fromkeys(TABLES, 0)
+    assert _counts(seeded.id)["chunks"] == EXPECTED["chunks"] + 1
 
 
 def test_claimed_data_is_searchable_and_listed(seeded):

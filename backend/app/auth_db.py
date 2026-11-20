@@ -429,10 +429,16 @@ def claim_local_data(email: str, *, dry_run: bool) -> dict:
             raise ClaimRefused("That address is the placeholder local account. Use your own.")
         params["target"] = target
 
-        # Lock the courses being moved so a sync or ingest cannot change them mid-copy.
-        session.execute(
-            text("SELECT 1 FROM courses WHERE user_id = :local FOR UPDATE"), params
-        ).all()
+        # Lock the usr_local rows of courses, lectures and documents (FOR UPDATE) until commit.
+        # Chunks and doc_chunks are not locked directly: writing a chunk takes a key-share lock
+        # on its lecture (or document) row through the foreign key, and that conflicts with
+        # FOR UPDATE. So a concurrent chunk replace waits here, and cannot land between the copy
+        # and the delete. New lectures and documents wait on their course row the same way. Rows
+        # of other tables (files, course_sites) are protected only through their course row.
+        for table in ("courses", "lectures", "documents"):
+            # Table names come from this fixed tuple, never from input.
+            lock_sql = f"SELECT 1 FROM {table} WHERE user_id = :local FOR UPDATE"  # noqa: S608
+            session.execute(text(lock_sql), params).all()
         clashes = session.execute(text(_CLAIM_CONFLICT_SQL), params).scalars().all()
         if clashes:
             raise ClaimRefused(

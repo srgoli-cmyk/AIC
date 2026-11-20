@@ -3,6 +3,9 @@ user_id, single-column keys) and on one that is already migrated, losing no rows
 
 The old schema is tests/fixtures/init_main.sql, an exact copy of backend/db/init.sql at origin/main
 commit 3afdcc49bb62504409cfca46154bc26530629686 (`git show origin/main:backend/db/init.sql`).
+The auth PR's schema is tests/fixtures/init_pr.sql, an exact copy of backend/db/init.sql at
+origin/feat/ucsd-google-auth commit fa45f14ed1bbde04d4cad629140e0ad40b294164 (it has per-user keys
+but no auth_exchange_codes.nonce_hash).
 Scratch databases end in `_test` and are dropped at the end, even when a test fails."""
 
 from pathlib import Path
@@ -11,12 +14,13 @@ import dbtools
 import pytest
 from sqlalchemy import create_engine, text
 
-from app import db
+from app import auth_db, db
 
 pytestmark = pytest.mark.integration
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MAIN_SCHEMA = (FIXTURES / "init_main.sql").read_text()
+PR_SCHEMA = (FIXTURES / "init_pr.sql").read_text()
 NEW_SCHEMA = db.INIT_SQL.read_text()
 DIM = 384
 
@@ -281,6 +285,118 @@ def test_same_canvas_course_for_two_students_after_migration(scratch_factory):
             )
         )
     assert s.count("courses") == 3
+
+
+def test_migrates_a_database_built_by_the_auth_pr(scratch_factory, monkeypatch):
+    """A database created from the auth PR's init.sql has per-user keys but no
+    auth_exchange_codes.nonce_hash. The current init.sql must add that column, keep every row and
+    leave the old code (no challenge) unusable."""
+    s = scratch_factory("aic_migration_pr_test")
+    s.run_sql(PR_SCHEMA)
+    with s.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users (id, google_sub, email, name, created_at, last_login_at) "
+                "VALUES ('usr_a', 'sub_a', 'a@ucsd.edu', 'A', now(), now())"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO sessions (id, user_id, token_hash, kind, expires_at, created_at) "
+                "VALUES ('ses_1', 'usr_a', 'tokhash', 'web', now() + interval '1 day', now())"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO auth_exchange_codes (code_hash, user_id, expires_at, created_at) "
+                "VALUES (:h, 'usr_a', now() + interval '1 day', now())"
+            ),
+            {"h": auth_db.hash_token("old-raw-code")},
+        )
+        # Per-user data for two students; the same Canvas course for both.
+        for user in ("usr_local", "usr_a"):
+            conn.execute(
+                text(
+                    "INSERT INTO courses (user_id, course_id, canvas_course_id, code, name, "
+                    "synced_at) VALUES (:u, 'canvas-1', 1, 'MATH 20A', 'Calc', now())"
+                ),
+                {"u": user},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO lectures (user_id, entry_id, course_id, title, duration_sec, "
+                    "media_url, captions_srt) VALUES (:u, 'e1', 'canvas-1', 'L1', 60, "
+                    "'https://x/e1', 'cap')"
+                ),
+                {"u": user},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO chunks (user_id, entry_id, start_sec, end_sec, text, embedding) "
+                    "VALUES (:u, 'e1', 0, 10, 'chunk', CAST(:v AS vector))"
+                ),
+                {"u": user, "v": _vec(3)},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO files (user_id, canvas_file_id, course_id, name) "
+                    "VALUES (:u, 10, 'canvas-1', 'a.pdf')"
+                ),
+                {"u": user},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO documents (user_id, doc_id, course_id, source, name, url, "
+                    "version, content_hash, pages, synced_at) VALUES (:u, 'canvas-file-10', "
+                    "'canvas-1', 'canvas', 'a.pdf', 'https://x/a', 'v1', 'h', 1, now())"
+                ),
+                {"u": user},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO doc_chunks (user_id, doc_id, page, text, embedding) "
+                    "VALUES (:u, 'canvas-file-10', 1, 'page', CAST(:v AS vector))"
+                ),
+                {"u": user, "v": _vec(7)},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO course_sites (user_id, course_id, url, title, chosen_by, "
+                    "status, updated_at) VALUES (:u, 'canvas-1', 'https://site', 'Site', "
+                    "'student', 'done', now())"
+                ),
+                {"u": user},
+            )
+    tables = (*TABLES, "users", "sessions", "auth_exchange_codes")
+    before = {t: s.count(t) for t in tables}
+    assert before["courses"] == 2 and before["chunks"] == 2 and before["auth_exchange_codes"] == 1
+    assert before["users"] == 2  # usr_local (seeded by the schema) and usr_a
+
+    s.run_sql(NEW_SCHEMA)
+    s.run_sql(NEW_SCHEMA)  # a second startup must change nothing and not fail
+
+    assert {t: s.count(t) for t in tables} == before
+    for table in TABLES:
+        assert s.key_defs(table) == EXPECTED_KEYS[table], table
+    with s.engine.connect() as conn:
+        columns = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'auth_exchange_codes'"
+                )
+            )
+        }
+        assert "nonce_hash" in columns
+        challenge = conn.execute(text("SELECT nonce_hash FROM auth_exchange_codes")).scalar()
+        assert challenge is None  # the old row has no challenge
+
+    # The old code is refused whatever nonce is sent, and is burned by the attempt.
+    monkeypatch.setattr(db, "engine", s.engine)
+    monkeypatch.setattr(db, "_schema_ready", True)
+    assert auth_db.consume_extension_code("old-raw-code", "any-nonce") is None
+    assert s.count("auth_exchange_codes") == 0
 
 
 def test_init_sql_on_an_empty_database_twice(scratch_factory):

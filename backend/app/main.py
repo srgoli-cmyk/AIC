@@ -15,12 +15,13 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from . import answer, auth, auth_db, coursesite, db, embeddings, ingest, slides, study
-from .config import extension_origin, settings
+from .config import allowed_host_list, extension_origin, settings
 from .origin import OriginCheckMiddleware
 from .schemas import (
     AskRequest,
@@ -102,6 +103,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+# Added last, so it is the outermost layer and runs first: a request whose Host is not in
+# ALLOWED_HOSTS gets 400 before CORS, the Origin check (which trusts Host) or any route. This is
+# the defence against DNS rebinding. The port in the Host header is ignored.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_host_list(settings.allowed_hosts))
 
 app.include_router(auth.router)
 
