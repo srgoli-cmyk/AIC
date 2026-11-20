@@ -67,6 +67,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         db.rename_documents(slides.display_name)
     except DB_DOWN:
         log.warning("database unavailable at startup; schema will be applied on first use")
+    else:
+        # Expired sessions are already refused at login time; this only keeps the tables small.
+        # Only the error type is logged (a database error's text can hold the connection string),
+        # and a failure never stops the app.
+        try:
+            auth_db.purge_expired()
+        except Exception as exc:
+            log.warning("purge of expired sessions failed at startup: %s", type(exc).__name__)
     # Load the embedding model now, off the event loop, so the first question is not slow. A
     # failure must not stop the app: a request that needs the model tries to load it again and
     # answers 503 if that fails too. Only the error type is logged, never its message.
